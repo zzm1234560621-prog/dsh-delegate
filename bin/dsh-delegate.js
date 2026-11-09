@@ -202,9 +202,30 @@ function commandPrintConfig() {
   );
 }
 
+function openBrowser(url) {
+  const { spawn } = require('node:child_process');
+  const command = process.platform === 'win32' ? process.env.ComSpec || 'cmd.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const args = process.platform === 'win32' ? ['/d', '/s', '/c', 'start', '""', url] : [url];
+  try {
+    spawn(command, args, { detached: true, stdio: 'ignore' }).unref();
+  } catch {
+    /* the URL is printed anyway */
+  }
+}
+
+async function commandUi(args) {
+  const port = Number(args.port) || 7788;
+  const { url } = await require('../lib/ui').start({ port });
+  log(`dsh-delegate 配置界面: ${url}`);
+  log('  改模型 / 写凭据 / 实跑自检 / 重写客户端配置都在这个页面里。按 Ctrl+C 退出。');
+  if (args.open) openBrowser(url);
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const command = args._[0] || 'help';
+
+  if (args['dsh-app']) process.env.DSH_DELEGATE_APP = String(args['dsh-app']);
 
   if (args.version || command === '--version' || command === '-v') {
     log(pkg.version);
@@ -218,15 +239,20 @@ function main() {
   if (command === 'uninstall') return commandUninstall(args);
   if (command === 'doctor') return commandDoctor(args);
   if (command === 'print-config') return commandPrintConfig();
+  if (command === 'ui') return commandUi(args);
 
   log(`dsh-delegate ${pkg.version} — 让 Claude / Codex 把简单任务派给本机 DeepSeek Harness
 
 用法：
   dsh-delegate install [--targets=claude-desktop,claude-code,codex] [--dry-run] [--copy-credentials]
+  dsh-delegate ui [--port=7788] [--open]   # 本地配置界面：模型 / 思考强度 / 凭据 / 自检
   dsh-delegate doctor [--run]
   dsh-delegate print-config
   dsh-delegate uninstall [--remove-runtime]
-  dsh-delegate serve                 # MCP stdio server（一般由客户端拉起）
+  dsh-delegate serve                       # MCP stdio server（一般由客户端拉起）
+
+全局：
+  --dsh-app="C:\\Path\\To\\DSH NEXT.exe"    # 手动指定桌面版位置
 
 可执行文件（安装后）：dsh --profile headless "<任务>"
 `);

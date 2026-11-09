@@ -63,6 +63,50 @@ node ~/.dsh/bridge/bin/dsh-delegate.js doctor --run
 
 `doctor` 会检查 Node、DSH 安装位置、headless profile、凭据、各客户端配置，`--run` 再实跑一次小任务。
 
+## 本地配置界面（`dsh-delegate ui`）
+
+```bash
+dsh-delegate ui --open        # 默认 http://127.0.0.1:7788
+```
+
+一个不依赖外网的本地页面，管这些：
+
+- **执行模型**：供应商 / 模型 / 思考强度（off·low·medium·high），写进 headless profile 的标记块，不动你手写的 YAML；
+- **派活默认值**：沙箱模式（workspace-write / danger-full-access）、审批策略（never / ask）、单次等待、DSH 超时、并行上限 —— MCP 每次调用都重读，改完不用重启客户端；
+- **凭据**：直接写 `$DSH_HOME/.env`（会拒绝 `DSH_` 前缀）；
+- **自检**：实跑一次并把事件流打出来；
+- **客户端**：一键重写 Claude Desktop / Claude Code / Codex 的配置；
+- **子代理看板**：宽屏一排 6 个小卡片，窗口变窄自动少放几个；每张卡实时显示该子代理的工具调用和输出，可往下滚；顶部显示运行中数量、总条数、磁盘占用。
+
+### 异步作业是什么
+
+普通工具调用要求「调用—返回」在几十秒内完成，而一次真活可能要跑几分钟。异步作业就是把一次派活变成一个**可查询的任务**：
+
+1. 调用 `dsh_task` 后，服务端立刻开始跑，最多等你 `soft_wait_ms`；
+2. 这之内完成 → 直接给答复；没完成 → 返回 `job=dsh-xxxx`（**不是失败**）；
+3. 你用 `dsh_job({job_id})` 反复问，每次最多再等 45s，直到 `state=done/failed`；
+4. 期间服务端还会发 `notifications/progress` 进度（第几轮、在调什么工具），支持进度条的客户端就能看到活动。
+
+好处：宿主不会因为超时把结果丢掉，长任务也能像子代理那样「挂着跑、随时看」。
+
+## 运行记录与磁盘
+
+- 每个子代理/任务各有一条记录：`$DSH_HOME/delegate-runs/<id>.json` + `.jsonl`；
+- 跑完自动把事件流压成 **zstd**（和会话存储同一套做法），{...} 小文件保留明文；读取时透明解压；
+- 磁盘占用由 **大小** 控制，不按条数：默认 256 MB，界面里可改成 1024（1 GB）等；超了就按最旧优先滚动删除，**正在跑的不删**；
+- 事件文件单个超过 2 MB 会自动截断保留末尾。
+
+### 不同安装情况
+
+安装器按这个顺序找 DSH，找不到再报错（也可以显式指定）：
+
+1. `--dsh-app="C:\\Path\\To\\DSH NEXT.exe"` 或环境变量 `DSH_DELEGATE_APP`；
+2. 常见安装目录（Program Files / LOCALAPPDATA\\Programs / /Applications / /opt）里的 DSH 桌面版；
+3. 扫一遍这些根目录下所有带 `resources/app.asar` 的应用目录（非标准安装位置也能命中）；
+4. PATH 上的 `dsh`（npm 安装的 CLI）——会跳过自己生成的启动器 shim，避免自我递归。
+
+macOS / Linux 上如果没有桌面版，装 `@deepseek-ai/dsh` 让 `dsh` 进 PATH 即可；其余流程一致。
+
 ## 三个工具
 
 | 工具 | 用途 |

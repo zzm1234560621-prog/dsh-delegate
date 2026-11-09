@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dsh-delegate · 本机 DSH 委派配置</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e222b;
+    --line: #2a2f3a;
+    --text: #e6e8ee;
+    --muted: #8b93a7;
+    --accent: #4c8dff;
+    --ok: #3ecf8e;
+    --warn: #f0b429;
+    --err: #f45b69;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.6 "Segoe UI", system-ui, -apple-system, "Microsoft YaHei", sans-serif;
+  }
+  header {
+    padding: 20px 28px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  h1 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: .2px; }
+  .tag { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; }
+  main { max-width: 980px; margin: 0 auto; padding: 22px 28px 60px; display: grid; gap: 16px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+  section h2 { margin: 0 0 12px; font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; }
+  section h2 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  input, select, textarea {
+    width: 100%; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit;
+  }
+  input:focus, select:focus, textarea:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  .row { display: flex; gap: 8px; align-items: center; }
+  button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+    padding: 8px 14px; font: inherit; cursor: pointer; white-space: nowrap;
+  }
+  button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  button:disabled { opacity: .55; cursor: default; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; }
+  .pill { font-size: 11px; border-radius: 999px; padding: 1px 8px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.ok { color: var(--ok); border-color: #245c44; }
+  .pill.warn { color: var(--warn); border-color: #5c4a1e; }
+  .pill.err { color: var(--err); border-color: #5c2630; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  pre {
+    background: #0b0d11; border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px; overflow: auto; max-height: 320px; margin: 10px 0 0;
+    font-family: ui-monospace, Consolas, monospace; font-size: 12px; white-space: pre-wrap;
+  }
+  .kv { display: grid; grid-template-columns: 120px 1fr; gap: 4px 12px; font-size: 13px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; word-break: break-all; }
+  .msg { margin-top: 10px; font-size: 12px; }
+  .msg.ok { color: var(--ok); } .msg.err { color: var(--err); }
+  .runs {
+    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 10px; max-height: 62vh; overflow-y: auto; padding-right: 4px;
+  }
+  @media (max-width: 1500px) { .runs { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+  @media (max-width: 1050px) { .runs { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  @media (max-width: 760px) { .runs { grid-template-columns: repeat(1, minmax(0, 1fr)); } }
+  .run {
+    border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2);
+    padding: 9px 10px; height: 230px; display: flex; flex-direction: column; gap: 6px;
+    min-width: 0; overflow: hidden;
+  }
+  .run.running { border-color: #2f6b52; box-shadow: inset 0 0 0 1px rgba(62,207,142,.15); }
+  .run.failed { border-color: #5c2630; }
+  .run-head { display: flex; gap: 6px; align-items: center; min-width: 0; }
+  .run-title {
+    font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    flex: 1; min-width: 0;
+  }
+  .run-meta { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .run-events {
+    flex: 1; overflow: auto; border-top: 1px dashed var(--line); padding-top: 6px;
+    font-family: ui-monospace, Consolas, monospace; font-size: 11px; line-height: 1.5;
+    white-space: pre-wrap; word-break: break-word; color: #c8cede;
+  }
+  .run-events .tool { color: #8ab4ff; }
+  .run-events .turn { color: var(--warn); }
+  .run-events .text { color: #b9c2d6; }
+</style>
+</head>
+<body>
+<header>
+  <h1>dsh-delegate</h1>
+  <span class="tag" id="dsh-tag">正在检测 DSH…</span>
+  <span class="tag mono" id="node-tag"></span>
+  <div style="flex:1"></div>
+  <button class="ghost" id="refresh">刷新状态</button>
+</header>
+
+<main>
+  <section>
+    <h2><span class="dot"></span>执行环境</h2>
+    <dl class="kv" id="env-kv"></dl>
+    <p class="hint">headless profile 是最瘦的执行配置：只有 base + headless（外加你选的模型插件），没有 GUI / 市场 / 桌面插件。</p>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>执行模型</h2>
+    <div class="grid">
+      <div>
+        <label for="provider">模型供应商</label>
+        <select id="provider"></select>
+        <div class="hint" id="provider-hint"></div>
+      </div>
+      <div>
+        <label for="model">模型</label>
+        <input id="model" list="model-list" placeholder="例如 deepseek-v4.1-flash" />
+        <datalist id="model-list"></datalist>
+      </div>
+      <div>
+        <label for="effort">思考强度</label>
+        <select id="effort"></select>
+      </div>
+      <div style="display:flex; align-items:flex-end; gap:8px;">
+        <button id="save-model">保存</button>
+        <button class="ghost" id="reset-model">恢复默认</button>
+      </div>
+    </div>
+    <div class="msg" id="model-msg"></div>
+    <p class="hint">写入 <span class="mono" id="patch-path"></span> 里的标记块，下次派活生效。</p>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>派活默认值（权限 / 审批 / 等待）</h2>
+    <div class="grid">
+      <div>
+        <label for="perm">沙箱模式</label>
+        <select id="perm">
+          <option value="workspace-write">workspace-write — 只能写工作目录 / write_scope 内</option>
+          <option value="danger-full-access">danger-full-access — 不限制写入范围</option>
+        </select>
+        <div class="hint">子代理默认在工作目录里跑；这一项决定它能写多远。</div>
+      </div>
+      <div>
+        <label for="approval">审批策略</label>
+        <select id="approval">
+          <option value="never">never — 无人值守，需要审批的调用直接拒绝</option>
+          <option value="ask">ask — 需要人工批准（headless 没人应答会等到超时）</option>
+        </select>
+        <div class="hint">选 ask 时建议把超时调小，避免一直挂着。</div>
+      </div>
+      <div>
+        <label for="softwait">单次调用最多等多久（毫秒）</label>
+        <input id="softwait" type="number" min="1000" max="150000" step="1000" />
+        <div class="hint">超过就交还 job id，让模型用 dsh_job 继续等。</div>
+      </div>
+      <div>
+        <label for="timeout">DSH 自身超时（毫秒）</label>
+        <input id="timeout" type="number" min="30000" max="1800000" step="10000" />
+      </div>
+      <div>
+        <label for="concurrency">并行上限</label>
+        <input id="concurrency" type="number" min="1" max="8" step="1" />
+        <div class="hint">dsh_parallel 没显式指定时用这个。</div>
+      </div>
+      <div>
+        <label for="storage">运行记录最多占多少 MB</label>
+        <input id="storage" type="number" min="16" max="20480" step="16" />
+        <div class="hint">按磁盘大小滚动删除最旧的记录；1024 = 1 GB，0 不保留也行（最小 16）。</div>
+      </div>
+      <div style="display:flex; align-items:flex-end;">
+        <button id="save-settings">保存默认值</button>
+      </div>
+    </div>
+    <div class="msg" id="settings-msg"></div>
+    <p class="hint">存在 <span class="mono" id="settings-path"></span>；MCP 每次调用都会重读，改完不用重启客户端。也可以用环境变量 <span class="mono">DSH_DELEGATE_PERMISSION_MODE</span> / <span class="mono">DSH_DELEGATE_APPROVAL_POLICY</span> 给单个客户端单独覆盖。</p>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>凭据</h2>
+    <table>
+      <thead><tr><th>变量</th><th>状态</th><th>位置</th></tr></thead>
+      <tbody id="env-rows"></tbody>
+    </table>
+    <div class="grid" style="margin-top:12px;">
+      <div><label for="env-name">变量名</label><input id="env-name" placeholder="OPENCODE_GO_ACCOUNT_KEY" /></div>
+      <div><label for="env-value">值</label><input id="env-value" type="password" placeholder="sk-… / oc_…" /></div>
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <button id="save-env">写入 .env</button>
+      <span class="hint" style="margin:0">headless 只从启动环境、&lt;cwd&gt;/.env、$DSH_HOME/.env 取 key；<b>DSH_ 开头的变量名会被拒绝</b>。</span>
+    </div>
+    <div class="msg" id="env-msg"></div>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>子代理实时看板</h2>
+    <div class="row" style="gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+      <span class="pill ok" id="running-count">运行中 0</span>
+      <span class="pill" id="total-count">共 0</span>
+      <span class="hint" style="margin:0">每 1.5s 刷新；列数随窗口自适应（宽屏 6 个，窄屏更少）。</span>
+      <span class="pill" id="storage-info">磁盘 —</span>
+      <span class="pill" id="more-info"></span>
+      <div style="flex:1"></div>
+      <button class="ghost" id="refresh-runs">立即刷新</button>
+    </div>
+    <div id="run-list" class="runs"></div>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>自检：实跑一次</h2>
+    <div class="row">
+      <input id="test-task" value="只回复两个字：可用" />
+      <button id="run-test">运行</button>
+    </div>
+    <pre id="test-out">等待运行…</pre>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>客户端接入</h2>
+    <table>
+      <thead><tr><th>客户端</th><th>配置位置</th><th>状态</th></tr></thead>
+      <tbody id="client-rows"></tbody>
+    </table>
+    <div class="row" style="margin-top:12px;">
+      <button id="install-clients">重新写入三个客户端</button>
+      <span class="hint" style="margin:0">改完重启对应客户端才会重新加载 MCP server。</span>
+    </div>
+    <div class="msg" id="client-msg"></div>
+  </section>
+</main>
+
+<script>
+let state = null;
+let runsTimer = null;
+
+function el(id) { return document.getElementById(id); }
+
+function relTime(ts) {
+  if (!ts) return '';
+  const seconds = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (seconds < 60) return seconds + 's';
+  if (seconds < 3600) return Math.round(seconds / 60) + 'm';
+  return (seconds / 3600).toFixed(1) + 'h';
+}
+
+function statePill(stateName) {
+  const map = { running: ['ok', '运行中'], done: ['ok', '完成'], failed: ['err', '失败'], lost: ['warn', '进程没了'] };
+  const [kind, text] = map[stateName] || ['warn', stateName];
+  const span = document.createElement('span');
+  span.className = 'pill ' + kind;
+  span.textContent = text;
+  return span;
+}
+
+function visibleColumns() {
+  const width = window.innerWidth;
+  if (width >= 1500) return 6;
+  if (width >= 1050) return 4;
+  if (width >= 760) return 3;
+  return 1;
+}
+
+async function loadRuns() {
+  try {
+    const data = await api('/api/runs');
+    el('running-count').textContent = '运行中 ' + data.running;
+    el('total-count').textContent = '共 ' + data.runs.length;
+    if (data.storage) {
+      const mb = (data.storage.bytes / 1024 / 1024).toFixed(1);
+      el('storage-info').textContent = '磁盘 ' + mb + ' MB · ' + data.storage.runs + ' 条 · 已压缩 ' + (data.storage.compressed || 0);
+    }
+
+    const list = el('run-list');
+    list.innerHTML = '';
+    if (!data.runs.length) {
+      list.innerHTML = '<div class="hint">还没有运行记录。派一个任务或点上面的「运行」自检。</div>';
+      el('more-info').textContent = '';
+      return;
+    }
+
+    // Window width decides how many panels fit: running ones first, then newest.
+    const columns = visibleColumns();
+    const capacity = columns * 2;
+    const ordered = [...data.runs].sort((a, b) => {
+      const rank = (run) => (run.state === 'running' ? 0 : 1);
+      return rank(a) - rank(b) || b.startedAt - a.startedAt;
+    });
+    const cards = ordered.slice(0, capacity);
+    el('more-info').textContent = ordered.length > capacity ? '还有 ' + (ordered.length - capacity) + ' 条更早的记录' : '';
+
+    const details = await Promise.all(
+      cards.map((run) => api('/api/runs/' + encodeURIComponent(run.id)).catch(() => null)),
+    );
+
+    cards.forEach((run, index) => {
+      const card = document.createElement('div');
+      card.className = 'run ' + run.state;
+
+      const head = document.createElement('div');
+      head.className = 'run-head';
+      const title = document.createElement('span');
+      title.className = 'run-title';
+      title.textContent = run.title || run.id;
+      title.title = run.title || run.id;
+      head.appendChild(title);
+      head.appendChild(statePill(run.state));
+      card.appendChild(head);
+
+      const meta = document.createElement('div');
+      meta.className = 'run-meta';
+      const elapsed = run.durationMs ? Math.round(run.durationMs / 1000) + 's' : relTime(run.startedAt);
+      meta.textContent = [run.kind, elapsed, run.toolCalls + '×工具'].join(' · ');
+      card.appendChild(meta);
+
+      const box = document.createElement('div');
+      box.className = 'run-events';
+      const detail = details[index];
+      if (detail && detail.events && detail.events.length) {
+        for (const event of detail.events.slice(-40)) {
+          const line = document.createElement('div');
+          line.className = event.kind;
+          line.textContent = formatEvent(event);
+          box.appendChild(line);
+        }
+      } else {
+        box.textContent = run.state === 'running' ? '等待第一段输出…' : (run.text || '（没有活动记录）');
+      }
+      card.appendChild(box);
+      list.appendChild(card);
+      if (run.state === 'running') box.scrollTop = box.scrollHeight;
+    });
+  } catch (cause) {
+    el('running-count').textContent = '读取失败：' + cause.message;
+  }
+}
+
+function formatEvent(event) {
+  const time = new Date(event.t).toLocaleTimeString();
+  if (event.kind === 'tool') return time + '  ' + (event.name || 'tool') + (event.detail ? '  ' + event.detail : '');
+  if (event.kind === 'turn') return time + '  第 ' + event.turn + ' 轮';
+  if (event.kind === 'text') return time + '  ' + String(event.text || '').slice(0, 300);
+  return time + '  ' + JSON.stringify(event).slice(0, 160);
+}
+
+function startRunPolling() {
+  if (runsTimer) clearInterval(runsTimer);
+  runsTimer = setInterval(() => { loadRuns(); }, 1500);
+}
+
+function pill(ok, text) {
+  const span = document.createElement('span');
+  span.className = 'pill ' + (ok ? 'ok' : 'warn');
+  span.textContent = text;
+  return span;
+}
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
+  return data;
+}
+
+function renderSettings() {
+  const settings = state.config.settings;
+  el('perm').value = settings.permissionMode;
+  el('approval').value = settings.approvalPolicy;
+  el('softwait').value = settings.softWaitMs;
+  el('timeout').value = settings.timeoutMs;
+  el('concurrency').value = settings.maxConcurrency;
+  el('storage').value = settings.maxStorageMb;
+  el('settings-path').textContent = state.config.settingsFile;
+}
+
+function renderEnv() {
+  const rows = el('env-rows');
+  rows.innerHTML = '';
+  const keys = state.config.env.keys;
+  if (!keys.length) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="3" class="hint">还没有 .env 条目</td>';
+    rows.appendChild(tr);
+    return;
+  }
+  for (const key of keys) {
+    const tr = document.createElement('tr');
+    const name = document.createElement('td');
+    name.className = 'mono';
+    name.textContent = key.name;
+    const statusCell = document.createElement('td');
+    statusCell.appendChild(pill(!key.reserved, key.hasValue ? '已设置' : '空值'));
+    if (key.reserved) statusCell.appendChild(document.createTextNode(' DSH 保留，会被拒绝'));
+    const where = document.createElement('td');
+    where.className = 'hint';
+    where.textContent = state.config.env.file;
+    tr.append(name, statusCell, where);
+    rows.appendChild(tr);
+  }
+}
+
+function renderClients() {
+  const rows = el('client-rows');
+  rows.innerHTML = '';
+  for (const [name, info] of Object.entries(state.clients)) {
+    const tr = document.createElement('tr');
+    const cellName = document.createElement('td');
+    cellName.textContent = name;
+    const cellFile = document.createElement('td');
+    cellFile.className = 'mono hint';
+    cellFile.textContent = info.file || '未找到';
+    const cellState = document.createElement('td');
+    cellState.appendChild(pill(info.configured, info.configured ? '已接入' : '未接入'));
+    tr.append(cellName, cellFile, cellState);
+    rows.appendChild(tr);
+  }
+}
+
+function renderModel() {
+  const model = state.config.model;
+  const select = el('provider');
+  select.innerHTML = '';
+  for (const provider of state.config.providers) {
+    const option = document.createElement('option');
+    option.value = provider.id;
+    option.textContent = provider.label + (provider.available ? '' : '（未安装插件）');
+    select.appendChild(option);
+  }
+  if (!state.config.providers.some((provider) => provider.id === model.provider)) {
+    const option = document.createElement('option');
+    option.value = model.provider;
+    option.textContent = model.provider;
+    select.appendChild(option);
+  }
+  select.value = model.provider;
+  el('model').value = model.model;
+  el('effort').value = model.reasoningEffort || '';
+  updateProviderHint();
+}
+
+function updateProviderHint() {
+  const id = el('provider').value;
+  const provider = state.config.providers.find((item) => item.id === id);
+  const list = el('model-list');
+  list.innerHTML = '';
+  const hint = el('provider-hint');
+  if (!provider) { hint.textContent = '自定义供应商：请确认对应插件已装进 headless profile。'; return; }
+  for (const name of provider.models) {
+    const option = document.createElement('option');
+    option.value = name;
+    list.appendChild(option);
+  }
+  const parts = [];
+  parts.push(provider.available ? '插件已安装' : '插件未安装 → 先用 dsh plugin --profile headless add ' + provider.plugin);
+  parts.push(provider.hasCredential ? '凭据已设置' : '缺少 ' + provider.envKey);
+  hint.textContent = parts.join(' · ');
+  if (provider.models.length && !el('model').value) el('model').value = provider.models[0];
+}
+
+async function load() {
+  state = await api('/api/state');
+  const launch = state.dsh.launch;
+  el('dsh-tag').textContent = launch ? ('DSH 已找到：' + (launch.kind === 'desktop' ? '桌面版' : 'CLI')) : '未找到 DSH';
+  el('node-tag').textContent = 'node ' + state.dsh.node + ' · ' + state.dsh.platform;
+  const kv = el('env-kv');
+  kv.innerHTML = '';
+  const rows = [
+    ['DSH 位置', launch ? launch.detail : (state.dsh.launchError || '未知')],
+    ['DSH_HOME', state.config.dshHome],
+    ['headless profile', state.config.profileDir],
+    ['启动命令', state.launcher || '—'],
+    ['当前模型', state.config.model.provider + ' / ' + state.config.model.model + (state.config.model.reasoningEffort ? ' / ' + state.config.model.reasoningEffort : '')],
+  ];
+  for (const [key, value] of rows) {
+    const dt = document.createElement('dt');
+    dt.textContent = key;
+    const dd = document.createElement('dd');
+    dd.className = 'mono';
+    dd.textContent = value;
+    kv.append(dt, dd);
+  }
+  el('patch-path').textContent = state.config.patchFile;
+  renderModel();
+  renderSettings();
+  renderEnv();
+  renderClients();
+  await loadRuns();
+  startRunPolling();
+}
+
+el('refresh').addEventListener('click', () => load().catch(showError));
+el('refresh-runs').addEventListener('click', () => loadRuns());
+
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  if (resizeTimer) clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { loadRuns(); }, 200);
+});
+el('provider').addEventListener('change', updateProviderHint);
+
+el('save-model').addEventListener('click', async () => {
+  const msg = el('model-msg');
+  msg.className = 'msg';
+  msg.textContent = '保存中…';
+  try {
+    await api('/api/model', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: el('provider').value, model: el('model').value.trim(), reasoningEffort: el('effort').value }),
+    });
+    msg.className = 'msg ok';
+    msg.textContent = '已保存，下次派活生效。';
+    await load();
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = cause.message;
+  }
+});
+
+el('reset-model').addEventListener('click', async () => {
+  const msg = el('model-msg');
+  try {
+    await api('/api/model/reset', { method: 'POST' });
+    msg.className = 'msg ok';
+    msg.textContent = '已移除 dsh-delegate 的模型覆盖块。';
+    await load();
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = cause.message;
+  }
+});
+
+el('save-settings').addEventListener('click', async () => {
+  const msg = el('settings-msg');
+  msg.className = 'msg';
+  msg.textContent = '保存中…';
+  try {
+    await api('/api/settings', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        permissionMode: el('perm').value,
+        approvalPolicy: el('approval').value,
+        softWaitMs: Number(el('softwait').value),
+        timeoutMs: Number(el('timeout').value),
+        maxConcurrency: Number(el('concurrency').value),
+        maxStorageMb: Number(el('storage').value),
+      }),
+    });
+    msg.className = 'msg ok';
+    msg.textContent = '已保存，下一次派活就按这个走。';
+    await load();
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = cause.message;
+  }
+});
+
+el('save-env').addEventListener('click', async () => {
+  const msg = el('env-msg');
+  msg.className = 'msg';
+  msg.textContent = '写入中…';
+  try {
+    await api('/api/env', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: el('env-name').value.trim(), value: el('env-value').value }),
+    });
+    msg.className = 'msg ok';
+    msg.textContent = '已写入 .env。';
+    el('env-value').value = '';
+    await load();
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = cause.message;
+  }
+});
+
+el('run-test').addEventListener('click', async () => {
+  const out = el('test-out');
+  out.textContent = '';
+  const button = el('run-test');
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/test', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ task: el('test-task').value }),
+    });
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let index = buffer.indexOf('\n');
+      while (index !== -1) {
+        const line = buffer.slice(0, index).trim();
+        buffer = buffer.slice(index + 1);
+        if (line) {
+          const event = JSON.parse(line);
+          if (event.kind === 'final') {
+            out.textContent += '\n=== ' + (event.ok ? '成功' : '失败') + ' · ' + Math.round(event.durationMs / 1000) + 's ===\n' + (event.text || event.reason || '') + '\n';
+          } else if (event.kind === 'tool') {
+            out.textContent += '· 调用 ' + event.name + '\n';
+          } else if (event.kind === 'turn') {
+            out.textContent += '· 第 ' + event.turn + ' 轮\n';
+          }
+        }
+        index = buffer.indexOf('\n');
+      }
+      out.scrollTop = out.scrollHeight;
+    }
+  } catch (cause) {
+    out.textContent += '\n错误：' + cause.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+el('install-clients').addEventListener('click', async () => {
+  const msg = el('client-msg');
+  msg.className = 'msg';
+  msg.textContent = '写入中…';
+  try {
+    const result = await api('/api/clients/install', { method: 'POST' });
+    msg.className = 'msg ok';
+    msg.textContent = result.results.map((item) => item.target + ': ' + item.status).join(' | ');
+    await load();
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = cause.message;
+  }
+});
+
+function showError(cause) {
+  el('dsh-tag').textContent = '状态读取失败：' + cause.message;
+}
+
+load().catch(showError);
+</script>
+</body>
+</html>
