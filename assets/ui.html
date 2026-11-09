@@ -135,6 +135,7 @@
   .run-events .tool { color: #8ab4ff; }
   .run-events .turn { color: var(--warn); }
   .run-events .text { color: #b9c2d6; }
+  .run-events .result { color: #7fd6a8; opacity: .85; }
 </style>
 </head>
 <body>
@@ -289,6 +290,7 @@
       <span class="pill" id="storage-info">磁盘 —</span>
       <span class="pill" id="more-info"></span>
       <div style="flex:1"></div>
+      <button class="ghost" id="toggle-finished">显示已结束</button>
       <button class="ghost" id="refresh-runs">立即刷新</button>
     </div>
     <div id="run-list" class="runs"></div>
@@ -333,6 +335,7 @@
 <script>
 let state = null;
 let runsTimer = null;
+let showFinished = false;
 
 function el(id) { return document.getElementById(id); }
 
@@ -449,15 +452,33 @@ async function loadRuns() {
       el('more-info').textContent = '';
       return;
     }
+    if (!showFinished && data.running === 0) {
+      list.innerHTML =
+        '<div class="hint">现在没有运行中的子代理。' +
+        (data.runs.length ? '点「显示已结束 (' + data.runs.length + ')」看历史记录。' : '') +
+        '</div>';
+      cardById.clear();
+      return;
+    }
 
     const columns = visibleColumns();
     const capacity = columns * 2;
-    const ordered = [...data.runs].sort((a, b) => {
-      const rank = (run) => (run.state === 'running' ? 0 : 1);
-      return rank(a) - rank(b) || b.startedAt - a.startedAt;
-    });
+    const running = data.runs.filter((run) => run.state === 'running');
+    const finished = data.runs.filter((run) => run.state !== 'running');
+    const ordered = [...(showFinished ? [...running, ...finished] : running)].sort(
+      (a, b) => b.startedAt - a.startedAt,
+    );
     const shown = ordered.slice(0, capacity);
-    el('more-info').textContent = ordered.length > capacity ? '还有 ' + (ordered.length - capacity) + ' 条更早的记录' : '';
+
+    el('toggle-finished').textContent = showFinished
+      ? '只看运行中'
+      : '显示已结束 (' + finished.length + ')';
+    el('more-info').textContent =
+      ordered.length > capacity
+        ? '还有 ' + (ordered.length - capacity) + ' 条更早的记录'
+        : !showFinished && finished.length
+          ? '已结束的 ' + finished.length + ' 条已隐藏'
+          : '';
 
     const details = await Promise.all(
       shown.map((run) => api('/api/runs/' + encodeURIComponent(run.id)).catch(() => null)),
@@ -484,9 +505,13 @@ async function loadRuns() {
 
 function formatEvent(event) {
   const time = new Date(event.t).toLocaleTimeString();
-  if (event.kind === 'tool') return time + '  ' + (event.name || 'tool') + (event.detail ? '  ' + event.detail : '');
+  if (event.kind === 'tool') return time + '  ⚙ ' + (event.name || 'tool') + (event.detail ? '  ' + event.detail : '');
   if (event.kind === 'turn') return time + '  第 ' + event.turn + ' 轮';
   if (event.kind === 'text') return time + '  ' + String(event.text || '').slice(0, 300);
+  if (event.kind === 'result') {
+    const output = String(event.text || '').trim().replace(/\s+/g, ' ').slice(0, 220);
+    return time + '  ↳ ' + (output || '（无输出）');
+  }
   return time + '  ' + JSON.stringify(event).slice(0, 160);
 }
 
@@ -850,6 +875,17 @@ async function load() {
 
 el('refresh').addEventListener('click', () => load().catch(showError));
 el('refresh-runs').addEventListener('click', () => loadRuns());
+el('toggle-finished').addEventListener('click', () => {
+  showFinished = !showFinished;
+  el('toggle-finished').textContent = showFinished ? '只看运行中' : '显示已结束';
+  if (!showFinished) {
+    for (const [id, card] of cardById) {
+      card.remove();
+    }
+    cardById.clear();
+  }
+  loadRuns();
+});
 
 let resizeTimer = null;
 window.addEventListener('resize', () => {
