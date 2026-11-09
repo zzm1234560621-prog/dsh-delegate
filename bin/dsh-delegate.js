@@ -247,7 +247,8 @@ function commandAutostart(args) {
     const result = autostart.enable({ port });
     require('../lib/config').writeSettings({ daemonAutostart: true, daemonPort: port });
     log(`已开启登录自启动（${result.mechanism}）：${result.target}`);
-    log(`  启动内容：dsh-delegate daemon --no-ui --port=${port}`);
+    const ui = require('../lib/config').readSettings().daemonUi !== false;
+    log(`  启动内容：dsh-delegate daemon${ui ? '' : ' --no-ui'} --port=${port}`);
     return;
   }
   if (action === 'off') {
