@@ -9,10 +9,12 @@
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 
-const serverPath = path.join(__dirname, '..', 'bin', 'dsh-delegate.js');
+// Spawn the same file the client configs point at, so a broken entry point fails CI.
+const serverPath = path.join(__dirname, '..', 'lib', 'mcp.js');
 const live = process.argv.includes('--run');
 
-const child = spawn(process.execPath, [serverPath, 'serve'], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+const child = spawn(process.execPath, [serverPath], { stdio: ['pipe', 'pipe', 'pipe'] });
 
 let buffer = '';
 let nextId = 1;

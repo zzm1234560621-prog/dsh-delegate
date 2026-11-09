@@ -67,6 +67,48 @@ function runtimeContext() {
   };
 }
 
+/** Spawn the deployed entry point and require a JSON-RPC reply, so a broken
+ *  entry (e.g. a module that only exports and exits) fails the install loudly. */
+function verifyEntry(mcpPath) {
+  const { spawn } = require('node:child_process');
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(process.execPath, [mcpPath], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    } catch {
+      resolve(false);
+      return;
+    }
+    let out = '';
+    let settled = false;
+    const done = (ok) => {
+      if (settled) return;
+      settled = true;
+      try {
+        child.kill();
+      } catch {
+        /* ignore */
+      }
+      resolve(ok);
+    };
+    child.stdout.on('data', (chunk) => {
+      out += chunk.toString('utf8');
+      if (out.includes('"result"')) done(true);
+    });
+    child.on('exit', () => done(out.includes('"result"')));
+    child.on('error', () => done(false));
+    child.stdin.write(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'install-check', version: '1' } },
+      }) + '\n',
+    );
+    setTimeout(() => done(out.includes('"result"')), 5000);
+  });
+}
+
 function parseTargets(value) {
   const all = ['claude-desktop', 'claude-code', 'codex'];
   if (!value || value === true) return all;
@@ -79,7 +121,7 @@ function parseTargets(value) {
   return list;
 }
 
-function commandInstall(args) {
+async function commandInstall(args) {
   const dryRun = Boolean(args['dry-run']);
   const launch = dsh.discover();
   const ctx = runtimeContext();
@@ -90,7 +132,14 @@ function commandInstall(args) {
 
   if (!dryRun) copyRuntime(bridgeDir());
 
+
+
   const results = [];
+
+  if (!dryRun) {
+    const ok = await verifyEntry(ctx.mcpPath);
+    results.push({ what: 'verify', status: ok ? 'ok' : 'FAILED', file: ok ? ctx.mcpPath : `${ctx.mcpPath}（没有响应 MCP 握手）` });
+  }
   results.push({ what: 'shim', ...agents.installShim(launch, ctx.dshHome, { dryRun }) });
   for (const item of agents.installSkill(ctx.dshHome, { dryRun })) results.push({ what: 'skill', ...item });
   for (const item of agents.installInstructions(ctx.dshHome, { dryRun })) results.push({ what: 'instructions', ...item });
