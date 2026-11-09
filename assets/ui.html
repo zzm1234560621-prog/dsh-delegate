@@ -83,7 +83,8 @@
   }
   .modal-title { font-weight: 600; }
   .modal-meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
-  .modal-body { padding: 16px 18px 24px; overflow: auto; }
+  .modal-body { flex: 1; min-height: 0; padding: 16px 18px 24px; overflow: auto; overscroll-behavior: auto; }
+  .modal-body pre { max-height: 260px; overflow: auto; }
   .conv-turn {
     color: var(--warn); font-size: 11px; letter-spacing: .4px; text-transform: uppercase;
     margin: 18px 0 8px; border-top: 1px dashed var(--line); padding-top: 10px;
@@ -524,6 +525,10 @@ function formatEvent(event) {
 
 let modalRunId = null;
 let modalTimer = null;
+let modalSignature = '';
+let modalRendered = 0;
+
+const RUN_STATE_LABELS = { running: '运行中', done: '完成', failed: '失败', lost: '进程没了' };
 
 function eventToBlock(event) {
   if (event.kind === 'turn') {
@@ -567,24 +572,43 @@ async function refreshModal() {
   try {
     const data = await api('/api/runs/' + encodeURIComponent(modalRunId));
     const body = el('modal-body');
-    const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 60;
+    const events = data.events || [];
+
     el('modal-title').textContent = data.run.title || data.run.id;
     const elapsed = data.run.durationMs ? Math.round(data.run.durationMs / 1000) + 's' : relTime(data.run.startedAt);
     el('modal-meta').textContent = [
       data.run.kind,
-      data.run.state,
+      RUN_STATE_LABELS[data.run.state] || data.run.state,
       elapsed,
       data.run.toolCalls + '×工具',
       data.run.sessionId || '',
     ].filter(Boolean).join(' · ');
 
-    body.innerHTML = '';
-    for (const event of data.events || []) {
+    // Only touch the DOM when something new arrived, and append instead of
+    // rebuilding: a full innerHTML reset is what snapped the view back to the top.
+    const signature = events.length + ':' + (events.length ? events[events.length - 1].t : 0);
+    if (signature === modalSignature) return;
+    modalSignature = signature;
+
+    const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 60;
+    const savedScroll = body.scrollTop;
+
+    if (events.length < modalRendered) {
+      body.innerHTML = '';
+      modalRendered = 0;
+    }
+    if (!events.length) {
+      body.textContent = '还没有事件。';
+      modalRendered = 0;
+      return;
+    }
+    for (const event of events.slice(modalRendered)) {
       const block = eventToBlock(event);
       if (block) body.appendChild(block);
     }
-    if (!data.events || !data.events.length) body.textContent = '还没有事件。';
-    if (nearBottom) body.scrollTop = body.scrollHeight;
+    modalRendered = events.length;
+
+    body.scrollTop = nearBottom ? body.scrollHeight : savedScroll;
   } catch {
     /* modal target may have been pruned */
   }
@@ -592,6 +616,8 @@ async function refreshModal() {
 
 function openRunModal(id) {
   modalRunId = id;
+  modalSignature = '';
+  modalRendered = 0;
   el('run-modal').hidden = false;
   el('modal-body').innerHTML = '';
   refreshModal();
