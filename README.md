@@ -14,6 +14,19 @@ Codex        ───┘                                    （可并行 3-5 �
 
 `--profile headless` 是最瘦的 DSH profile：只挂 `base + headless`（外加你选的模型插件），没有 GUI、插件市场、桌面 UI 那一堆东西。相比之下，带一堆插件的会话每轮都要为那些插件付 prefill。
 
+## 作为 DSH 插件安装
+
+`plugin/` 是一个可直接安装的 configuration-only bundle，装进 profile 后该 profile 的所有会话都会多出
+`mcp__dsh__dsh_task` / `dsh_parallel` / `dsh_job` 三个工具：
+
+```bash
+dsh plugin --profile <profile> add "file:C:/path/to/dsh-delegate/plugin"
+# 或发布到 npm 后：dsh plugin --profile <profile> add dsh-delegate
+```
+
+重启该 profile 生效。它只负责挂 MCP 工具；CLI 启动器、skill/指令、外部客户端接入和看板仍由
+`dsh-delegate install` 提供。上架市场的进度见 [MARKETPLACE.md](MARKETPLACE.md)。
+
 ## 支持矩阵
 
 | 宿主 | 接入方式 | 状态 |

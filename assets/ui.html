@@ -107,10 +107,8 @@
   }
   .runs {
     display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: 10px; max-height: 62vh; overflow-y: auto; padding-right: 4px;
-    scrollbar-width: none;
+    gap: 10px;
   }
-  .runs::-webkit-scrollbar { display: none; }
   @media (max-width: 1500px) { .runs { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
   @media (max-width: 1050px) { .runs { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   @media (max-width: 760px) { .runs { grid-template-columns: repeat(1, minmax(0, 1fr)); } }
@@ -132,10 +130,11 @@
   .run-events {
     flex: 1; overflow: hidden; border-top: 1px dashed var(--line); padding-top: 6px;
     font-family: ui-monospace, Consolas, monospace; font-size: 11px; line-height: 1.5;
-    white-space: pre-wrap; word-break: break-word; color: #c8cede;
-    display: flex; flex-direction: column; justify-content: flex-end;
+    color: #c8cede;
   }
-  .run-events > div { overflow: hidden; text-overflow: ellipsis; }
+  .run-events > div {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.55;
+  }
   .run-events .tool { color: #8ab4ff; }
   .run-events .turn { color: var(--warn); }
   .run-events .text { color: #b9c2d6; }
@@ -424,14 +423,14 @@ function updateCard(card, run, detail) {
 
   // The card keeps no scrollbar: it always shows the newest activity, trimmed to
   // the last few lines that fit the fixed height.
-  const MAX_LINES = 7;
+  const MAX_LINES = 6;
   parts.box.innerHTML = '';
   if (events.length) {
     const fragment = document.createDocumentFragment();
     for (const event of events.slice(-MAX_LINES)) {
       const line = document.createElement('div');
       line.className = event.kind;
-      line.textContent = formatEvent(event).slice(0, 220);
+      line.textContent = formatEvent(event).slice(0, 160);
       fragment.appendChild(line);
     }
     parts.box.appendChild(fragment);
@@ -506,7 +505,8 @@ async function loadRuns() {
       }
     }
   } catch (cause) {
-    el('running-count').textContent = '读取失败：' + cause.message;
+    // The service may be restarting: keep polling instead of freezing on one error.
+    el('running-count').textContent = '连接中…（' + cause.message + '）';
   }
 }
 
@@ -877,7 +877,6 @@ async function load() {
   await loadService();
   await loadCatalogs(false);
   await loadRuns();
-  startRunPolling();
 }
 
 el('refresh').addEventListener('click', () => load().catch(showError));
@@ -1118,6 +1117,12 @@ function showError(cause) {
 }
 
 load().catch(showError);
+
+// Poll regardless of the first load outcome, so a restarting service heals itself.
+startRunPolling();
+setInterval(() => {
+  if (!state) load().catch(() => {});
+}, 5000);
 </script>
 </body>
 </html>

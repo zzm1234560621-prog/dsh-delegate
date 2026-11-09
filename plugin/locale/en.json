@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "DSH Delegate",
+    "description": "Hand mechanical work to a local DSH subagent: parallel fan-out, per-task write scopes, job polling for long runs, and a local dashboard."
+  }
+}

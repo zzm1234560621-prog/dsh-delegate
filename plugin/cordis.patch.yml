@@ -1,0 +1,18 @@
+# Mount the bundled MCP server for this profile, so every session in it can hand
+# mechanical work to a local DSH subagent.
+#
+# The server ships inside this bundle (server/lib/mcp.js). The profile install path
+# is preferred; a `dsh-delegate install` deployment under $DSH_HOME/bridge is the
+# fallback for setups that only ran the standalone installer.
+- insert:
+    - id: dsh-delegate-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: dsh
+        transport: stdio
+        command: !!js process.execPath
+        args:
+          - !!js "process.env.DSH_PROFILE_DIR ? (process.env.DSH_PROFILE_DIR + '/node_modules/dsh-delegate/server/lib/mcp.js') : (((process.env.DSH_HOME || ((process.env.USERPROFILE || process.env.HOME || '.') + '/.dsh')) + '/bridge/lib/mcp.js'))"
+        env:
+          DSH_HOME: !!js "(process.env.DSH_HOME || ((process.env.USERPROFILE || process.env.HOME || '.') + '/.dsh'))"
+        failOnStartupError: false
