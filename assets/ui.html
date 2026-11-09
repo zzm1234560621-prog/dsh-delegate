@@ -108,7 +108,9 @@
   .runs {
     display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 10px; max-height: 62vh; overflow-y: auto; padding-right: 4px;
+    scrollbar-width: none;
   }
+  .runs::-webkit-scrollbar { display: none; }
   @media (max-width: 1500px) { .runs { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
   @media (max-width: 1050px) { .runs { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   @media (max-width: 760px) { .runs { grid-template-columns: repeat(1, minmax(0, 1fr)); } }
@@ -128,10 +130,12 @@
   }
   .run-meta { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .run-events {
-    flex: 1; overflow: auto; border-top: 1px dashed var(--line); padding-top: 6px;
+    flex: 1; overflow: hidden; border-top: 1px dashed var(--line); padding-top: 6px;
     font-family: ui-monospace, Consolas, monospace; font-size: 11px; line-height: 1.5;
     white-space: pre-wrap; word-break: break-word; color: #c8cede;
+    display: flex; flex-direction: column; justify-content: flex-end;
   }
+  .run-events > div { overflow: hidden; text-overflow: ellipsis; }
   .run-events .tool { color: #8ab4ff; }
   .run-events .turn { color: var(--warn); }
   .run-events .text { color: #b9c2d6; }
@@ -416,23 +420,24 @@ function updateCard(card, run, detail) {
   const events = detail && detail.events ? detail.events : [];
   const signature = events.length + ':' + (events.length ? events[events.length - 1].t : 0);
   if (card.dataset.signature === signature) return;
-
-  const nearBottom = parts.box.scrollHeight - parts.box.scrollTop - parts.box.clientHeight < 40;
   card.dataset.signature = signature;
+
+  // The card keeps no scrollbar: it always shows the newest activity, trimmed to
+  // the last few lines that fit the fixed height.
+  const MAX_LINES = 7;
   parts.box.innerHTML = '';
   if (events.length) {
     const fragment = document.createDocumentFragment();
-    for (const event of events.slice(-40)) {
+    for (const event of events.slice(-MAX_LINES)) {
       const line = document.createElement('div');
       line.className = event.kind;
-      line.textContent = formatEvent(event);
+      line.textContent = formatEvent(event).slice(0, 220);
       fragment.appendChild(line);
     }
     parts.box.appendChild(fragment);
   } else {
     parts.box.textContent = run.state === 'running' ? '等待第一段输出…' : (run.text || '（没有活动记录）');
   }
-  if (nearBottom || run.state === 'running') parts.box.scrollTop = parts.box.scrollHeight;
 }
 
 async function loadRuns() {
@@ -479,6 +484,8 @@ async function loadRuns() {
         : !showFinished && finished.length
           ? '已结束的 ' + finished.length + ' 条已隐藏'
           : '';
+
+    for (const hint of [...list.querySelectorAll('.hint')]) hint.remove();
 
     const details = await Promise.all(
       shown.map((run) => api('/api/runs/' + encodeURIComponent(run.id)).catch(() => null)),
