@@ -34,15 +34,24 @@ function table(rows) {
 }
 
 function copyRuntime(dest) {
-  fs.mkdirSync(dest, { recursive: true });
-  for (const entry of ['lib', 'assets', 'bin']) {
-    const from = path.join(ROOT, entry);
-    const to = path.join(dest, entry);
-    fs.rmSync(to, { recursive: true, force: true });
-    fs.cpSync(from, to, { recursive: true });
-  }
-  for (const file of ['package.json']) {
-    fs.copyFileSync(path.join(ROOT, file), path.join(dest, file));
+  // Stage into a sibling directory and swap, so an interrupted install can never
+  // leave a half-copied runtime behind (e.g. lib/ missing).
+  const stage = `${dest}.staging-${process.pid}`;
+  fs.rmSync(stage, { recursive: true, force: true });
+  fs.mkdirSync(stage, { recursive: true });
+  try {
+    for (const entry of ['lib', 'assets', 'bin']) {
+      fs.cpSync(path.join(ROOT, entry), path.join(stage, entry), { recursive: true });
+    }
+    fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(stage, 'package.json'));
+
+    const backup = `${dest}.old-${process.pid}`;
+    if (fs.existsSync(dest)) fs.renameSync(dest, backup);
+    fs.renameSync(stage, dest);
+    fs.rmSync(backup, { recursive: true, force: true });
+  } catch (cause) {
+    fs.rmSync(stage, { recursive: true, force: true });
+    throw cause;
   }
 }
 

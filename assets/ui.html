@@ -67,6 +67,43 @@
   .kv dd { margin: 0; word-break: break-all; }
   .msg { margin-top: 10px; font-size: 12px; }
   .msg.ok { color: var(--ok); } .msg.err { color: var(--err); }
+  .modal {
+    position: fixed; inset: 0; background: rgba(4,6,10,.72);
+    display: flex; align-items: center; justify-content: center; z-index: 50; padding: 24px;
+  }
+  .modal[hidden] { display: none; }
+  .modal-card {
+    width: min(980px, 96vw); height: min(82vh, 900px); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 14px; display: flex; flex-direction: column; overflow: hidden;
+  }
+  .modal-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 14px 18px; border-bottom: 1px solid var(--line);
+  }
+  .modal-title { font-weight: 600; }
+  .modal-meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .modal-body { padding: 16px 18px 24px; overflow: auto; }
+  .conv-turn {
+    color: var(--warn); font-size: 11px; letter-spacing: .4px; text-transform: uppercase;
+    margin: 18px 0 8px; border-top: 1px dashed var(--line); padding-top: 10px;
+  }
+  .conv-text { white-space: pre-wrap; margin: 8px 0 12px; line-height: 1.65; }
+  .conv-tool { margin: 8px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+  .conv-tool summary {
+    cursor: pointer; padding: 7px 10px; font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px; color: #8ab4ff; list-style: none;
+  }
+  .conv-tool summary::-webkit-details-marker { display: none; }
+  .conv-tool pre {
+    margin: 0; padding: 8px 10px; border-top: 1px solid var(--line);
+    font-family: ui-monospace, Consolas, monospace; font-size: 12px; white-space: pre-wrap; color: #c8cede;
+  }
+  .conv-result { margin: 6px 0 12px; }
+  .conv-result pre {
+    margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+    background: #0b0d11; font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+    white-space: pre-wrap; color: #b9c2d6;
+  }
   .runs {
     display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 10px; max-height: 62vh; overflow-y: auto; padding-right: 4px;
@@ -161,9 +198,9 @@
         <div class="hint" id="provider-hint"></div>
       </div>
       <div>
-        <label for="model">模型</label>
-        <input id="model" list="model-list" placeholder="例如 deepseek-v4.1-flash" />
-        <datalist id="model-list"></datalist>
+        <label for="model-select">模型</label>
+        <select id="model-select"></select>
+        <input id="model-custom" placeholder="自定义模型 id，例如 gpt-5.5" style="display:none; margin-top:6px" />
       </div>
       <div>
         <label for="effort">思考强度</label>
@@ -279,6 +316,19 @@
   </section>
 </main>
 
+<div id="run-modal" class="modal" hidden>
+  <div class="modal-card">
+    <header class="modal-head">
+      <div>
+        <div class="modal-title" id="modal-title">子代理</div>
+        <div class="modal-meta" id="modal-meta"></div>
+      </div>
+      <button class="ghost" id="modal-close">关闭</button>
+    </header>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
 <script>
 let state = null;
 let runsTimer = null;
@@ -339,6 +389,8 @@ function ensureCard(run) {
   card.appendChild(box);
 
   card.__parts = { title, pillBox, meta, box };
+  card.addEventListener('click', () => openRunModal(run.id));
+  card.style.cursor = 'pointer';
   cardById.set(run.id, card);
   return card;
 }
@@ -437,6 +489,98 @@ function formatEvent(event) {
   return time + '  ' + JSON.stringify(event).slice(0, 160);
 }
 
+let modalRunId = null;
+let modalTimer = null;
+
+function eventToBlock(event) {
+  if (event.kind === 'turn') {
+    const div = document.createElement('div');
+    div.className = 'conv-turn';
+    div.textContent = '第 ' + event.turn + ' 轮';
+    return div;
+  }
+  if (event.kind === 'text') {
+    const div = document.createElement('div');
+    div.className = 'conv-text';
+    div.textContent = event.text;
+    return div;
+  }
+  if (event.kind === 'tool') {
+    const details = document.createElement('details');
+    details.className = 'conv-tool';
+    const summary = document.createElement('summary');
+    summary.textContent = '⚙ ' + (event.name || 'tool') + (event.detail ? ' — ' + event.detail : '');
+    details.appendChild(summary);
+    if (event.detail) {
+      const pre = document.createElement('pre');
+      pre.textContent = event.detail;
+      details.appendChild(pre);
+    }
+    return details;
+  }
+  if (event.kind === 'result') {
+    const wrap = document.createElement('div');
+    wrap.className = 'conv-result';
+    const pre = document.createElement('pre');
+    pre.textContent = String(event.text || '').trim() || '（无输出）';
+    wrap.appendChild(pre);
+    return wrap;
+  }
+  return null;
+}
+
+async function refreshModal() {
+  if (!modalRunId) return;
+  try {
+    const data = await api('/api/runs/' + encodeURIComponent(modalRunId));
+    const body = el('modal-body');
+    const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 60;
+    el('modal-title').textContent = data.run.title || data.run.id;
+    const elapsed = data.run.durationMs ? Math.round(data.run.durationMs / 1000) + 's' : relTime(data.run.startedAt);
+    el('modal-meta').textContent = [
+      data.run.kind,
+      data.run.state,
+      elapsed,
+      data.run.toolCalls + '×工具',
+      data.run.sessionId || '',
+    ].filter(Boolean).join(' · ');
+
+    body.innerHTML = '';
+    for (const event of data.events || []) {
+      const block = eventToBlock(event);
+      if (block) body.appendChild(block);
+    }
+    if (!data.events || !data.events.length) body.textContent = '还没有事件。';
+    if (nearBottom) body.scrollTop = body.scrollHeight;
+  } catch {
+    /* modal target may have been pruned */
+  }
+}
+
+function openRunModal(id) {
+  modalRunId = id;
+  el('run-modal').hidden = false;
+  el('modal-body').innerHTML = '';
+  refreshModal();
+  if (modalTimer) clearInterval(modalTimer);
+  modalTimer = setInterval(refreshModal, 1200);
+}
+
+function closeRunModal() {
+  modalRunId = null;
+  el('run-modal').hidden = true;
+  if (modalTimer) clearInterval(modalTimer);
+  modalTimer = null;
+}
+
+el('modal-close').addEventListener('click', closeRunModal);
+el('run-modal').addEventListener('click', (event) => {
+  if (event.target === el('run-modal')) closeRunModal();
+});
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeRunModal();
+});
+
 function startRunPolling() {
   if (runsTimer) clearInterval(runsTimer);
   runsTimer = setInterval(() => { loadRuns(); }, 1500);
@@ -531,6 +675,66 @@ function renderClients() {
   }
 }
 
+const EFFORT_LABELS = { off: '关闭', low: '低', medium: '中', high: '高' };
+
+function fillEffort(current) {
+  const select = el('effort');
+  select.innerHTML = '';
+  for (const value of state.config.reasoning) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = (EFFORT_LABELS[value] || value) + '（' + value + '）';
+    select.appendChild(option);
+  }
+  const fallback = document.createElement('option');
+  fallback.value = '';
+  fallback.textContent = '跟随会话默认';
+  select.appendChild(fallback);
+  select.value = current || '';
+}
+
+function catalogFor(providerId) {
+  return (catalogs.providers && catalogs.providers[providerId]) || [];
+}
+
+function fillModelSelect(current) {
+  const select = el('model-select');
+  select.innerHTML = '';
+  const providerId = el('provider').value;
+  const provider = state.config.providers.find((item) => item.id === providerId);
+  const names = catalogFor(providerId).length ? catalogFor(providerId) : (provider ? provider.models : []);
+  for (const name of names) {
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = name;
+    select.appendChild(option);
+  }
+  const custom = document.createElement('option');
+  custom.value = '__custom__';
+  custom.textContent = '自定义…';
+  select.appendChild(custom);
+
+  if (current && names.includes(current)) {
+    select.value = current;
+    el('model-custom').style.display = 'none';
+  } else if (current) {
+    select.value = '__custom__';
+    el('model-custom').style.display = 'block';
+    el('model-custom').value = current;
+  } else if (names.length) {
+    select.value = names[0];
+    el('model-custom').style.display = 'none';
+  } else {
+    select.value = '__custom__';
+    el('model-custom').style.display = 'block';
+  }
+}
+
+function currentModel() {
+  const select = el('model-select');
+  return select.value === '__custom__' ? el('model-custom').value.trim() : select.value;
+}
+
 function renderModel() {
   const model = state.config.model;
   const select = el('provider');
@@ -548,41 +752,34 @@ function renderModel() {
     select.appendChild(option);
   }
   select.value = model.provider;
-  el('model').value = model.model;
-  el('effort').value = model.reasoningEffort || '';
-  updateProviderHint();
+  fillModelSelect(model.model);
+  fillEffort(model.reasoningEffort);
+  updateProviderHint(false);
 }
 
-let catalogs = { providers: {}, errors: {} };
-
-async function loadCatalogs(force) {
-  try {
-    catalogs = await api('/api/models' + (force ? '?refresh=1' : ''));
-    const hints = Object.entries(catalogs.errors || {}).map(([p, e]) => p + ': ' + e);
-    if (hints.length) el('provider-hint').title = hints.join('\n');
-  } catch (cause) {
-    catalogs = { providers: {}, errors: {} };
-  }
-  updateProviderHint();
-}
-
-function updateProviderHint() {
+function updateProviderHint(keepModel) {
   const id = el('provider').value;
   const provider = state.config.providers.find((item) => item.id === id);
-  const list = el('model-list');
-  list.innerHTML = '';
   const hint = el('provider-hint');
-  if (!provider) { hint.textContent = '自定义供应商：请确认对应插件已装进 headless profile。'; return; }
-  for (const name of provider.models) {
-    const option = document.createElement('option');
-    option.value = name;
-    list.appendChild(option);
+
+  if (!keepModel) {
+    // Provider switch: jump to the first model the catalog offers.
+    fillModelSelect('');
+  } else {
+    fillModelSelect(currentModel() || state.config.model.model);
   }
+
+  if (!provider) {
+    hint.textContent = '自定义供应商：确认对应插件已装进 headless profile。';
+    return;
+  }
+  const live = catalogFor(id);
   const parts = [];
-  parts.push(provider.available ? '插件已安装' : '插件未安装 → 先用 dsh plugin --profile headless add ' + provider.plugin);
+  parts.push(provider.available ? '插件已安装' : '插件未安装 → dsh plugin --profile headless add ' + provider.plugin);
   parts.push(provider.hasCredential ? '凭据已设置' : '缺少 ' + provider.envKey);
+  if (live.length) parts.push('接口返回 ' + live.length + ' 个模型');
+  else if (catalogs.errors && catalogs.errors[id]) parts.push('拉取失败：' + catalogs.errors[id]);
   hint.textContent = parts.join(' · ');
-  if (provider.models.length && !el('model').value) el('model').value = provider.models[0];
 }
 
 async function load() {
@@ -624,8 +821,25 @@ window.addEventListener('resize', () => {
   if (resizeTimer) clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => { loadRuns(); }, 200);
 });
-el('provider').addEventListener('change', updateProviderHint);
-el('refresh-models').addEventListener('click', () => loadCatalogs(true));
+el('provider').addEventListener('change', () => updateProviderHint(false));
+el('model-select').addEventListener('change', () => {
+  el('model-custom').style.display = el('model-select').value === '__custom__' ? 'block' : 'none';
+});
+el('refresh-models').addEventListener('click', async () => {
+  const msg = el('model-msg');
+  msg.className = 'msg';
+  msg.textContent = '拉取模型列表…';
+  await loadCatalogs(true);
+  const id = el('provider').value;
+  const count = catalogFor(id).length;
+  if (count > 0) {
+    msg.className = 'msg ok';
+    msg.textContent = '已刷新：' + count + ' 个模型可选。';
+  } else {
+    msg.className = 'msg err';
+    msg.textContent = '拉取失败：' + ((catalogs.errors && catalogs.errors[id]) || '接口没有返回模型');
+  }
+});
 
 el('save-model').addEventListener('click', async () => {
   const msg = el('model-msg');
@@ -635,7 +849,7 @@ el('save-model').addEventListener('click', async () => {
     await api('/api/model', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ provider: el('provider').value, model: el('model').value.trim(), reasoningEffort: el('effort').value }),
+      body: JSON.stringify({ provider: el('provider').value, model: currentModel(), reasoningEffort: el('effort').value }),
     });
     msg.className = 'msg ok';
     msg.textContent = '已保存，下次派活生效。';
