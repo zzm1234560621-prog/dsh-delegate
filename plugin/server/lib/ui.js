@@ -246,6 +246,8 @@ async function handleApi(req, res, pathname) {
           });
         } else if (event.type === 'text' && typeof event.text === 'string' && event.text.trim()) {
           runlog.append(run, { kind: 'text', text: event.text.slice(0, 4000) });
+        } else if (event.type === 'thinking' && typeof event.text === 'string' && event.text.trim()) {
+          runlog.append(run, { kind: 'thinking', text: event.text.slice(0, 4000) });
         }
       },
     });

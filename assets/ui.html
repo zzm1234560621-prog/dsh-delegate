@@ -19,8 +19,9 @@
     --err: #f45b69;
   }
   * { box-sizing: border-box; }
+  html { overflow-y: auto; }
   body {
-    margin: 0; background: var(--bg); color: var(--text);
+    margin: 0; background: var(--bg); color: var(--text); overflow-y: auto;
     font: 14px/1.6 "Segoe UI", system-ui, -apple-system, "Microsoft YaHei", sans-serif;
   }
   header {
@@ -90,6 +91,9 @@
     margin: 18px 0 8px; border-top: 1px dashed var(--line); padding-top: 10px;
   }
   .conv-text { white-space: pre-wrap; margin: 8px 0 12px; line-height: 1.65; }
+  .conv-think { margin: 8px 0; border: 1px dashed var(--line); border-radius: 8px; background: #14161c; }
+  .conv-think summary { cursor: pointer; padding: 6px 10px; font-size: 12px; color: var(--muted); list-style: none; }
+  .conv-think pre { margin: 0; padding: 8px 10px; border-top: 1px dashed var(--line); white-space: pre-wrap; color: #97a0b5; font-size: 12px; }
   .conv-tool { margin: 8px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
   .conv-tool summary {
     cursor: pointer; padding: 7px 10px; font-family: ui-monospace, Consolas, monospace;
@@ -129,9 +133,9 @@
   }
   .run-meta { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .run-events {
-    flex: 1; overflow: hidden; border-top: 1px dashed var(--line); padding-top: 6px;
-    font-family: ui-monospace, Consolas, monospace; font-size: 11px; line-height: 1.5;
-    color: #c8cede;
+    flex: 1; min-height: 0; overflow: hidden; border-top: 1px dashed var(--line); padding-top: 6px;
+    font-family: ui-monospace, Consolas, monospace; font-size: 11px; line-height: 1.55;
+    color: #c8cede; display: flex; flex-direction: column; justify-content: flex-end;
   }
   .run-events > div {
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.55;
@@ -422,13 +426,15 @@ function updateCard(card, run, detail) {
   if (card.dataset.signature === signature) return;
   card.dataset.signature = signature;
 
-  // The card keeps no scrollbar: it always shows the newest activity, trimmed to
-  // the last few lines that fit the fixed height.
-  const MAX_LINES = 6;
+  // The card keeps no scrollbar: render exactly the tail that fits its measured
+  // height, bottom-aligned, so the newest activity always sits at the bottom edge.
+  const lineHeight = 17;
+  const available = (parts.box.clientHeight || 165) - 6;
+  const maxLines = Math.max(3, Math.floor(available / lineHeight));
   parts.box.innerHTML = '';
   if (events.length) {
     const fragment = document.createDocumentFragment();
-    for (const event of events.slice(-MAX_LINES)) {
+    for (const event of events.slice(-maxLines)) {
       const line = document.createElement('div');
       line.className = event.kind;
       line.textContent = formatEvent(event).slice(0, 160);
@@ -494,8 +500,8 @@ async function loadRuns() {
     const seen = new Set();
     shown.forEach((run, index) => {
       const card = ensureCard(run);
+      list.appendChild(card); // measure first, then fill
       updateCard(card, run, details[index]);
-      list.appendChild(card); // reorder in place; DOM nodes are reused, so no flicker
       seen.add(run.id);
     });
 
@@ -516,6 +522,7 @@ function formatEvent(event) {
   if (event.kind === 'tool') return time + '  ⚙ ' + (event.name || 'tool') + (event.detail ? '  ' + event.detail : '');
   if (event.kind === 'turn') return time + '  第 ' + event.turn + ' 轮';
   if (event.kind === 'text') return time + '  ' + String(event.text || '').slice(0, 300);
+  if (event.kind === 'thinking') return time + '  💭 ' + String(event.text || '').replace(/\s+/g, ' ').slice(0, 200);
   if (event.kind === 'result') {
     const output = String(event.text || '').trim().replace(/\s+/g, ' ').slice(0, 220);
     return time + '  ↳ ' + (output || '（无输出）');
@@ -542,6 +549,17 @@ function eventToBlock(event) {
     div.className = 'conv-text';
     div.textContent = event.text;
     return div;
+  }
+  if (event.kind === 'thinking') {
+    const details = document.createElement('details');
+    details.className = 'conv-think';
+    const summary = document.createElement('summary');
+    summary.textContent = '💭 思考';
+    details.appendChild(summary);
+    const pre = document.createElement('pre');
+    pre.textContent = String(event.text || '');
+    details.appendChild(pre);
+    return details;
   }
   if (event.kind === 'tool') {
     const details = document.createElement('details');
