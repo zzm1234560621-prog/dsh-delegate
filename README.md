@@ -107,6 +107,37 @@ dsh-delegate ui --open        # 默认 http://127.0.0.1:7788
 
 macOS / Linux 上如果没有桌面版，装 `@deepseek-ai/dsh` 让 `dsh` 进 PATH 即可；其余流程一致。
 
+## 常驻服务与自启动
+
+看板和服务是分开的：
+
+```bash
+dsh-delegate daemon                # 常驻服务 + 看板    http://127.0.0.1:7788
+dsh-delegate daemon --no-ui        # 只跑服务，不开看板（API 仍在 /api/*）
+dsh-delegate daemon --open         # 起服务并打开浏览器
+dsh-delegate status                # 服务是否在跑 + 自启动状态
+```
+
+登录自启动（让「打开电脑 / 打开 Claude」时服务已经在）：
+
+```bash
+dsh-delegate autostart on          # 默认只起 API（--no-ui），不开浏览器
+dsh-delegate autostart status
+dsh-delegate autostart off
+```
+
+各平台落地：
+
+| 平台 | 机制 | 位置 |
+|---|---|---|
+| Windows | HKCU Run → 隐藏窗口的 VBS 启动器 | `%APPDATA%\dsh-delegate\daemon.vbs` |
+| macOS | LaunchAgent | `~/Library/LaunchAgents/dev.dsh-delegate.daemon.plist` |
+| Linux | XDG autostart | `~/.config/autostart/dsh-delegate.desktop` |
+
+安装时也可以直接带：`dsh-delegate install --autostart`。
+
+服务状态文件在 `$DSH_HOME/delegate-daemon.json`（pid / 端口 / 是否带看板），进程挂了下次启动会自然重启；`status` 会校验 pid 是否还活着。
+
 ## 三个工具
 
 | 工具 | 用途 |

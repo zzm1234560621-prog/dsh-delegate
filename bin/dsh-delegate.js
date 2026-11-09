@@ -92,6 +92,11 @@ function commandInstall(args) {
     }
   }
 
+  if (args.autostart && !dryRun) {
+    const result = require('../lib/autostart').enable({ port: Number(args.port) || 7788 });
+    results.push({ what: 'autostart', status: 'written', file: `${result.mechanism} → ${result.target}` });
+  }
+
   if (args['copy-credentials'] && !dryRun) {
     const copied = copyCredentials(ctx.dshHome);
     log(copied ? `凭据: ${copied}` : '凭据: 没有可复制的 DEEPSEEK_API_KEY（跳过）');
@@ -214,11 +219,53 @@ function openBrowser(url) {
 }
 
 async function commandUi(args) {
+  return commandDaemon({ ...args, 'no-ui': false });
+}
+
+async function commandDaemon(args) {
   const port = Number(args.port) || 7788;
-  const { url } = await require('../lib/ui').start({ port });
-  log(`dsh-delegate 配置界面: ${url}`);
-  log('  改模型 / 写凭据 / 实跑自检 / 重写客户端配置都在这个页面里。按 Ctrl+C 退出。');
-  if (args.open) openBrowser(url);
+  const withUi = !args['no-ui'];
+  const daemon = require('../lib/daemon');
+  const running = daemon.status();
+  if (running.running) {
+    log(`服务已在运行: ${running.url} (pid ${running.pid}, ${running.ui ? 'API + 看板' : '仅 API'})`);
+    if (withUi && args.open) openBrowser(running.url);
+    return;
+  }
+  const { url } = await daemon.run({ port, ui: withUi });
+  if (withUi && args.open) openBrowser(url);
+  // keep the process alive: daemon.run returns after the server starts
+  await new Promise(() => {});
+}
+
+function commandAutostart(args) {
+  const action = args._[1] || 'status';
+  const autostart = require('../lib/autostart');
+  const port = Number(args.port) || 7788;
+  if (action === 'on') {
+    const result = autostart.enable({ port });
+    log(`已开启登录自启动（${result.mechanism}）：${result.target}`);
+    log(`  启动内容：dsh-delegate daemon --no-ui --port=${port}`);
+    return;
+  }
+  if (action === 'off') {
+    const result = autostart.disable();
+    log(`已关闭登录自启动（${result.mechanism}）。`);
+    return;
+  }
+  const status = autostart.status();
+  const daemon = require('../lib/daemon').status();
+  log(`自启动：${status.enabled ? '已开启' : '未开启'}（${status.mechanism}）`);
+  log(`  目标：${status.target}`);
+  log(`服务：${daemon.running ? `运行中 ${daemon.url} (pid ${daemon.pid})` : '未运行'}`);
+}
+
+function commandStatus() {
+  const daemon = require('../lib/daemon').status();
+  const autostart = require('../lib/autostart').status();
+  log(`服务：${daemon.running ? `运行中 ${daemon.url}` : '未运行'}`);
+  if (daemon.running) log(`  pid ${daemon.pid} · ${daemon.ui ? 'API + 看板' : '仅 API'} · 状态文件 ${daemon.file}`);
+  log(`登录自启动：${autostart.enabled ? '已开启' : '未开启'}（${autostart.mechanism}）`);
 }
 
 function main() {
@@ -240,16 +287,22 @@ function main() {
   if (command === 'doctor') return commandDoctor(args);
   if (command === 'print-config') return commandPrintConfig();
   if (command === 'ui') return commandUi(args);
+  if (command === 'daemon' || command === 'service') return commandDaemon(args);
+  if (command === 'autostart') return commandAutostart(args);
+  if (command === 'status') return commandStatus();
 
   log(`dsh-delegate ${pkg.version} — 让 Claude / Codex 把简单任务派给本机 DeepSeek Harness
 
 用法：
-  dsh-delegate install [--targets=claude-desktop,claude-code,codex] [--dry-run] [--copy-credentials]
-  dsh-delegate ui [--port=7788] [--open]   # 本地配置界面：模型 / 思考强度 / 凭据 / 自检
+  dsh-delegate install [--targets=claude-desktop,claude-code,codex] [--dry-run] [--copy-credentials] [--autostart]
+  dsh-delegate daemon [--port=7788] [--no-ui] [--open]   # 常驻服务（可选是否带看板）
+  dsh-delegate ui [--port=7788] [--open]                 # daemon + 看板 + 打开浏览器
+  dsh-delegate autostart on|off|status [--port=7788]     # 登录自启动（默认仅 API）
+  dsh-delegate status
   dsh-delegate doctor [--run]
   dsh-delegate print-config
   dsh-delegate uninstall [--remove-runtime]
-  dsh-delegate serve                       # MCP stdio server（一般由客户端拉起）
+  dsh-delegate serve                                     # MCP stdio server（客户端拉起）
 
 全局：
   --dsh-app="C:\\Path\\To\\DSH NEXT.exe"    # 手动指定桌面版位置

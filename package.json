@@ -31,6 +31,9 @@
   },
   "scripts": {
     "install:local": "node bin/dsh-delegate.js install",
+    "daemon": "node bin/dsh-delegate.js daemon",
+    "daemon:api": "node bin/dsh-delegate.js daemon --no-ui",
+    "status": "node bin/dsh-delegate.js status",
     "doctor": "node bin/dsh-delegate.js doctor",
     "test": "node test/smoke.js",
     "test:live": "node test/smoke.js --run"
