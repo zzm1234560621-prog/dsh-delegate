@@ -223,8 +223,9 @@ async function commandUi(args) {
 }
 
 async function commandDaemon(args) {
-  const port = Number(args.port) || 7788;
-  const withUi = !args['no-ui'];
+  const settings = require('../lib/config').readSettings();
+  const port = Number(args.port) || settings.daemonPort || 7788;
+  const withUi = args['no-ui'] ? false : args.ui ? true : settings.daemonUi !== false;
   const daemon = require('../lib/daemon');
   const running = daemon.status();
   if (running.running) {
@@ -244,12 +245,14 @@ function commandAutostart(args) {
   const port = Number(args.port) || 7788;
   if (action === 'on') {
     const result = autostart.enable({ port });
+    require('../lib/config').writeSettings({ daemonAutostart: true, daemonPort: port });
     log(`已开启登录自启动（${result.mechanism}）：${result.target}`);
     log(`  启动内容：dsh-delegate daemon --no-ui --port=${port}`);
     return;
   }
   if (action === 'off') {
     const result = autostart.disable();
+    require('../lib/config').writeSettings({ daemonAutostart: false });
     log(`已关闭登录自启动（${result.mechanism}）。`);
     return;
   }

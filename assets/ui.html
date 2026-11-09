@@ -80,6 +80,8 @@
     min-width: 0; overflow: hidden;
   }
   .run.running { border-color: #2f6b52; box-shadow: inset 0 0 0 1px rgba(62,207,142,.15); }
+  .run.running .pill.ok { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
   .run.failed { border-color: #5c2630; }
   .run-head { display: flex; gap: 6px; align-items: center; min-width: 0; }
   .run-title {
@@ -114,6 +116,43 @@
   </section>
 
   <section>
+    <h2><span class="dot"></span>服务与自启动</h2>
+    <div class="row" style="gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+      <span class="pill" id="svc-state">检测中…</span>
+      <span class="pill mono" id="svc-detail"></span>
+      <span class="pill" id="svc-autostart">自启动 —</span>
+    </div>
+    <div class="grid">
+      <div>
+        <label for="svc-mode">启动模式</label>
+        <select id="svc-mode">
+          <option value="ui">服务 + 看板</option>
+          <option value="api">仅服务（不启动看板）</option>
+        </select>
+        <div class="hint">「仅服务」时 /api/* 仍可用，只是没有网页看板。</div>
+      </div>
+      <div>
+        <label for="svc-port">端口</label>
+        <input id="svc-port" type="number" min="1024" max="65535" step="1" />
+      </div>
+      <div>
+        <label>登录自启动</label>
+        <select id="svc-autostart-toggle">
+          <option value="off">关闭</option>
+          <option value="on">开启（开机即起服务，按上面模式）</option>
+        </select>
+        <div class="hint">Windows 写 HKCU Run 隐藏启动，macOS 用 LaunchAgent，Linux 用 XDG autostart。</div>
+      </div>
+      <div style="display:flex; align-items:flex-end; gap:8px;">
+        <button id="svc-save">保存</button>
+        <button class="ghost" id="svc-restart">重启服务</button>
+      </div>
+    </div>
+    <div class="msg" id="svc-msg"></div>
+    <p class="hint">状态文件 <span class="mono" id="svc-statefile"></span>；改模式/端口后需要重启服务才生效。</p>
+  </section>
+
+  <section>
     <h2><span class="dot"></span>执行模型</h2>
     <div class="grid">
       <div>
@@ -133,6 +172,7 @@
       <div style="display:flex; align-items:flex-end; gap:8px;">
         <button id="save-model">保存</button>
         <button class="ghost" id="reset-model">恢复默认</button>
+        <button class="ghost" id="refresh-models" title="从供应商接口重新拉取模型列表">刷新模型列表</button>
       </div>
     </div>
     <div class="msg" id="model-msg"></div>
@@ -270,6 +310,75 @@ function visibleColumns() {
   return 1;
 }
 
+const cardById = new Map();
+
+function ensureCard(run) {
+  let card = cardById.get(run.id);
+  if (card) return card;
+
+  card = document.createElement('div');
+  card.className = 'run';
+  card.dataset.id = run.id;
+
+  const head = document.createElement('div');
+  head.className = 'run-head';
+  const title = document.createElement('span');
+  title.className = 'run-title';
+  title.title = run.title || run.id;
+  head.appendChild(title);
+  const pillBox = document.createElement('span');
+  head.appendChild(pillBox);
+  card.appendChild(head);
+
+  const meta = document.createElement('div');
+  meta.className = 'run-meta';
+  card.appendChild(meta);
+
+  const box = document.createElement('div');
+  box.className = 'run-events';
+  card.appendChild(box);
+
+  card.__parts = { title, pillBox, meta, box };
+  cardById.set(run.id, card);
+  return card;
+}
+
+function updateCard(card, run, detail) {
+  const parts = card.__parts;
+  parts.title.textContent = run.title || run.id;
+  parts.pillBox.innerHTML = '';
+  parts.pillBox.appendChild(statePill(run.state));
+
+  const elapsed = run.durationMs ? Math.round(run.durationMs / 1000) + 's' : relTime(run.startedAt);
+  parts.meta.textContent = [run.kind, elapsed, run.toolCalls + '×工具', run.sessionId ? run.sessionId.slice(0, 16) : '']
+    .filter(Boolean)
+    .join(' · ');
+
+  card.classList.toggle('running', run.state === 'running');
+  card.classList.toggle('failed', run.state === 'failed');
+
+  const events = detail && detail.events ? detail.events : [];
+  const signature = events.length + ':' + (events.length ? events[events.length - 1].t : 0);
+  if (card.dataset.signature === signature) return;
+
+  const nearBottom = parts.box.scrollHeight - parts.box.scrollTop - parts.box.clientHeight < 40;
+  card.dataset.signature = signature;
+  parts.box.innerHTML = '';
+  if (events.length) {
+    const fragment = document.createDocumentFragment();
+    for (const event of events.slice(-40)) {
+      const line = document.createElement('div');
+      line.className = event.kind;
+      line.textContent = formatEvent(event);
+      fragment.appendChild(line);
+    }
+    parts.box.appendChild(fragment);
+  } else {
+    parts.box.textContent = run.state === 'running' ? '等待第一段输出…' : (run.text || '（没有活动记录）');
+  }
+  if (nearBottom || run.state === 'running') parts.box.scrollTop = parts.box.scrollHeight;
+}
+
 async function loadRuns() {
   try {
     const data = await api('/api/runs');
@@ -281,64 +390,40 @@ async function loadRuns() {
     }
 
     const list = el('run-list');
-    list.innerHTML = '';
     if (!data.runs.length) {
       list.innerHTML = '<div class="hint">还没有运行记录。派一个任务或点上面的「运行」自检。</div>';
+      cardById.clear();
       el('more-info').textContent = '';
       return;
     }
 
-    // Window width decides how many panels fit: running ones first, then newest.
     const columns = visibleColumns();
     const capacity = columns * 2;
     const ordered = [...data.runs].sort((a, b) => {
       const rank = (run) => (run.state === 'running' ? 0 : 1);
       return rank(a) - rank(b) || b.startedAt - a.startedAt;
     });
-    const cards = ordered.slice(0, capacity);
+    const shown = ordered.slice(0, capacity);
     el('more-info').textContent = ordered.length > capacity ? '还有 ' + (ordered.length - capacity) + ' 条更早的记录' : '';
 
     const details = await Promise.all(
-      cards.map((run) => api('/api/runs/' + encodeURIComponent(run.id)).catch(() => null)),
+      shown.map((run) => api('/api/runs/' + encodeURIComponent(run.id)).catch(() => null)),
     );
 
-    cards.forEach((run, index) => {
-      const card = document.createElement('div');
-      card.className = 'run ' + run.state;
-
-      const head = document.createElement('div');
-      head.className = 'run-head';
-      const title = document.createElement('span');
-      title.className = 'run-title';
-      title.textContent = run.title || run.id;
-      title.title = run.title || run.id;
-      head.appendChild(title);
-      head.appendChild(statePill(run.state));
-      card.appendChild(head);
-
-      const meta = document.createElement('div');
-      meta.className = 'run-meta';
-      const elapsed = run.durationMs ? Math.round(run.durationMs / 1000) + 's' : relTime(run.startedAt);
-      meta.textContent = [run.kind, elapsed, run.toolCalls + '×工具'].join(' · ');
-      card.appendChild(meta);
-
-      const box = document.createElement('div');
-      box.className = 'run-events';
-      const detail = details[index];
-      if (detail && detail.events && detail.events.length) {
-        for (const event of detail.events.slice(-40)) {
-          const line = document.createElement('div');
-          line.className = event.kind;
-          line.textContent = formatEvent(event);
-          box.appendChild(line);
-        }
-      } else {
-        box.textContent = run.state === 'running' ? '等待第一段输出…' : (run.text || '（没有活动记录）');
-      }
-      card.appendChild(box);
-      list.appendChild(card);
-      if (run.state === 'running') box.scrollTop = box.scrollHeight;
+    const seen = new Set();
+    shown.forEach((run, index) => {
+      const card = ensureCard(run);
+      updateCard(card, run, details[index]);
+      list.appendChild(card); // reorder in place; DOM nodes are reused, so no flicker
+      seen.add(run.id);
     });
+
+    for (const [id, card] of cardById) {
+      if (!seen.has(id)) {
+        card.remove();
+        cardById.delete(id);
+      }
+    }
   } catch (cause) {
     el('running-count').textContent = '读取失败：' + cause.message;
   }
@@ -369,6 +454,27 @@ async function api(path, options) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
   return data;
+}
+
+let serviceState = null;
+
+async function loadService() {
+  serviceState = await api('/api/service');
+  const running = serviceState.running;
+  const mode = serviceState.ui === null ? '未知' : serviceState.ui ? '服务 + 看板' : '仅服务';
+  el('svc-state').className = 'pill ' + (running ? 'ok' : 'warn');
+  el('svc-state').textContent = running ? '运行中' : '未运行';
+  el('svc-detail').textContent = running
+    ? mode + ' · :' + serviceState.port + ' · pid ' + serviceState.pid
+    : '--no-ui 时看板不可用，但 API 仍然在';
+  el('svc-autostart').className = 'pill ' + (serviceState.autostart.enabled ? 'ok' : 'warn');
+  el('svc-autostart').textContent = '自启动 ' + (serviceState.autostart.enabled ? '已开启' : '未开启');
+  el('svc-statefile').textContent = serviceState.stateFile;
+
+  const settings = serviceState.settings;
+  el('svc-mode').value = settings.daemonUi ? 'ui' : 'api';
+  el('svc-port').value = settings.daemonPort;
+  el('svc-autostart-toggle').value = settings.daemonAutostart ? 'on' : 'off';
 }
 
 function renderSettings() {
@@ -447,6 +553,19 @@ function renderModel() {
   updateProviderHint();
 }
 
+let catalogs = { providers: {}, errors: {} };
+
+async function loadCatalogs(force) {
+  try {
+    catalogs = await api('/api/models' + (force ? '?refresh=1' : ''));
+    const hints = Object.entries(catalogs.errors || {}).map(([p, e]) => p + ': ' + e);
+    if (hints.length) el('provider-hint').title = hints.join('\n');
+  } catch (cause) {
+    catalogs = { providers: {}, errors: {} };
+  }
+  updateProviderHint();
+}
+
 function updateProviderHint() {
   const id = el('provider').value;
   const provider = state.config.providers.find((item) => item.id === id);
@@ -506,6 +625,7 @@ window.addEventListener('resize', () => {
   resizeTimer = setTimeout(() => { loadRuns(); }, 200);
 });
 el('provider').addEventListener('change', updateProviderHint);
+el('refresh-models').addEventListener('click', () => loadCatalogs(true));
 
 el('save-model').addEventListener('click', async () => {
   const msg = el('model-msg');
@@ -536,6 +656,59 @@ el('reset-model').addEventListener('click', async () => {
   } catch (cause) {
     msg.className = 'msg err';
     msg.textContent = cause.message;
+  }
+});
+
+el('svc-save').addEventListener('click', async () => {
+  const msg = el('svc-msg');
+  msg.className = 'msg';
+  msg.textContent = '保存中…';
+  try {
+    const result = await api('/api/service', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        daemonUi: el('svc-mode').value === 'ui',
+        daemonPort: Number(el('svc-port').value),
+        daemonAutostart: el('svc-autostart-toggle').value === 'on',
+      }),
+    });
+    msg.className = 'msg ok';
+    msg.textContent = result.restartRequired ? '已保存；模式或端口变了，点「重启服务」生效。' : '已保存。';
+    await loadService();
+  await loadCatalogs(false);
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = cause.message;
+  }
+});
+
+el('svc-restart').addEventListener('click', async () => {
+  const msg = el('svc-msg');
+  msg.className = 'msg';
+  msg.textContent = '重启中…';
+  try {
+    await api('/api/service/restart', { method: 'POST' });
+    msg.textContent = '服务在重启，页面会自动重连…';
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      try {
+        const probe = await api('/api/service');
+        if (probe.running) {
+          msg.className = 'msg ok';
+          msg.textContent = '服务已重启（' + (probe.ui ? '服务 + 看板' : '仅服务') + ' · :' + probe.port + '）。';
+          await loadService();
+          return;
+        }
+      } catch {
+        /* still coming up */
+      }
+    }
+    msg.className = 'msg err';
+    msg.textContent = '重启后没探到服务，用 dsh-delegate status 看一眼。';
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = '如果当前页面就是被重启的这个服务，刷新一下即可：' + cause.message;
   }
 });
 
