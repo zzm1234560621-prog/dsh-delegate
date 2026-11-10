@@ -166,6 +166,18 @@ async function commandInstall(args) {
     log(`  ${item.what.padEnd(22)} ${String(item.status).padEnd(12)} ${where}`);
   }
 
+  if (!dryRun) {
+    const envFile = path.join(ctx.dshHome, '.env');
+    const hasKey = fs.existsSync(envFile) && /^[A-Z_]+=.+/m.test(fs.readFileSync(envFile, 'utf8'));
+    if (!hasKey && !process.env.DEEPSEEK_API_KEY) {
+      log('');
+      log('⚠ 没检测到凭据：headless 只读 $DSH_HOME/.env 或启动环境，不读 GUI 保存的 key。');
+      log('  第一次派活会报 MISSING_CREDENTIAL。补一个即可：');
+      log(`    "DEEPSEEK_API_KEY=sk-..." | Add-Content "${envFile}"`);
+      log('  或重跑本命令时加 --copy-credentials（从 DSH 已有凭据里搬）。');
+    }
+  }
+
   log('');
   log('下一步：');
   log('  1. 重启 Claude 桌面版 / 重新打开 Claude Code 会话，工具列表里会出现 dsh_task / dsh_parallel / dsh_job。');
