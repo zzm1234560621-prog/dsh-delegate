@@ -69,6 +69,8 @@
   .kv dd { margin: 0; word-break: break-all; }
   .msg { margin-top: 10px; font-size: 12px; }
   .msg.ok { color: var(--ok); } .msg.err { color: var(--err); }
+  @keyframes flash { 0%,100% { box-shadow: none; } 50% { box-shadow: 0 0 0 2px var(--accent); } }
+  section.flash { animation: flash 1.1s ease-in-out 2; }
   .modal {
     position: fixed; inset: 0; background: rgba(4,6,10,.72);
     display: flex; align-items: center; justify-content: center; z-index: 50; padding: 24px;
@@ -206,6 +208,7 @@
         <label for="provider">模型供应商</label>
         <select id="provider"></select>
         <div class="hint" id="provider-hint"></div>
+        <button class="ghost" id="fill-env" hidden>填 <span id="env-key-label">…</span> →</button>
       </div>
       <div>
         <label for="model-select">模型</label>
@@ -272,7 +275,7 @@
     <p class="hint">存在 <span class="mono" id="settings-path"></span>；MCP 每次调用都会重读，改完不用重启客户端。也可以用环境变量 <span class="mono">DSH_DELEGATE_PERMISSION_MODE</span> / <span class="mono">DSH_DELEGATE_APPROVAL_POLICY</span> 给单个客户端单独覆盖。</p>
   </section>
 
-  <section>
+  <section id="cred-card">
     <h2><span class="dot"></span>凭据</h2>
     <table>
       <thead><tr><th>变量</th><th>状态</th><th>位置</th></tr></thead>
@@ -909,6 +912,16 @@ function updateProviderHint(keepModel) {
   if (live.length) parts.push('接口返回 ' + live.length + ' 个模型');
   else if (catalogs.errors && catalogs.errors[id]) parts.push('拉取失败：' + catalogs.errors[id]);
   hint.textContent = parts.join(' · ');
+
+  const fill = el('fill-env');
+  if (provider.envKey) {
+    el('env-key-label').textContent = provider.envKey;
+    fill.hidden = false;
+    fill.disabled = provider.hasCredential;
+    fill.title = provider.hasCredential ? '这个变量已有值，仍可覆盖' : '';
+  } else {
+    fill.hidden = true;
+  }
 }
 
 async function load() {
@@ -963,6 +976,20 @@ window.addEventListener('resize', () => {
   resizeTimer = setTimeout(() => { loadRuns(); }, 200);
 });
 el('provider').addEventListener('change', () => updateProviderHint(false));
+el('fill-env').addEventListener('click', () => {
+  const provider = state.config.providers.find((item) => item.id === el('provider').value);
+  if (!provider || !provider.envKey) return;
+  el('env-name').value = provider.envKey;
+  el('env-value').value = '';
+  const card = el('cred-card');
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  card.classList.remove('flash');
+  void card.offsetWidth; // restart the animation
+  card.classList.add('flash');
+  setTimeout(() => card.classList.remove('flash'), 2400);
+  el('env-value').focus();
+});
+
 el('model-select').addEventListener('change', () => {
   el('model-custom').style.display = el('model-select').value === '__custom__' ? 'block' : 'none';
 });
