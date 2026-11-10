@@ -44,7 +44,10 @@ dsh plugin --profile <profile> add "file:C:/path/to/dsh-delegate/plugin"
 ```powershell
 git clone https://github.com/zzm1234560621-prog/dsh-delegate
 cd dsh-delegate
-pwsh -File install.ps1            # 加 -DryRun 先看会改什么
+install.cmd                       # 自动挑 pwsh / powershell；双击也行
+# 或显式：
+powershell -ExecutionPolicy Bypass -File install.ps1     # 加 -DryRun 先看会改什么
+pwsh -File install.ps1                                   # 装了 PowerShell 7 时
 ```
 
 **macOS / Linux**
@@ -203,7 +206,7 @@ headless profile **不读**桌面版的凭据库，只从启动环境、`<cwd>/.
 
 ```powershell
 # 从 DSH 已有的凭据里复制（安装时）
-pwsh -File install.ps1 -CopyCredentials
+install.cmd -CopyCredentials
 
 # 或者手写
 "DEEPSEEK_API_KEY=sk-..." | Add-Content "$env:USERPROFILE\.dsh\.env"
