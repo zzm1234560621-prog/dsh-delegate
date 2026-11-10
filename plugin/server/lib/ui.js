@@ -86,10 +86,27 @@ async function handleApi(req, res, pathname) {
 
   if (pathname === '/api/runs' && req.method === 'GET') {
     const runs = runlog.listRuns(20);
+    const totals = runs.reduce(
+      (acc, run) => {
+        if (run.usage) {
+          acc.input += run.usage.input || 0;
+          acc.output += run.usage.output || 0;
+          acc.total += run.usage.total || 0;
+          acc.wallMs += run.usage.wallMs || 0;
+          acc.runs += 1;
+        }
+        return acc;
+      },
+      { input: 0, output: 0, total: 0, wallMs: 0, runs: 0 },
+    );
+    totals.outputPerSecond = totals.wallMs
+      ? Math.round((totals.output / (totals.wallMs / 1000)) * 10) / 10
+      : 0;
     return json(res, 200, {
       runs,
       running: runs.filter((run) => run.state === 'running').length,
       storage: runlog.storageInfo(),
+      totals,
     });
   }
 
@@ -257,6 +274,7 @@ async function handleApi(req, res, pathname) {
       sessionId: result.sessionId,
       text: result.text,
       reason: result.reason,
+      usage: result.usage,
     });
     write({ kind: 'final', ok: result.ok, text: result.text, reason: result.reason, durationMs: result.durationMs });
     res.end();

@@ -296,6 +296,7 @@
       <span class="pill" id="total-count">共 0</span>
       <span class="hint" style="margin:0">每 1.5s 刷新；列数随窗口自适应（宽屏 6 个，窄屏更少）。</span>
       <span class="pill" id="storage-info">磁盘 —</span>
+      <span class="pill" id="token-total">tokens —</span>
       <span class="pill" id="more-info"></span>
       <div style="flex:1"></div>
       <button class="ghost" id="toggle-finished">显示已结束</button>
@@ -414,7 +415,10 @@ function updateCard(card, run, detail) {
   parts.pillBox.appendChild(statePill(run.state));
 
   const elapsed = run.durationMs ? Math.round(run.durationMs / 1000) + 's' : relTime(run.startedAt);
-  parts.meta.textContent = [run.kind, elapsed, run.toolCalls + '×工具', run.sessionId ? run.sessionId.slice(0, 16) : '']
+  const tokenInfo = run.usage
+    ? formatTokens(run.usage.total) + ' tok · ' + run.usage.outputPerSecond + ' tok/s'
+    : '';
+  parts.meta.textContent = [run.kind, elapsed, run.toolCalls + '×工具', tokenInfo, run.sessionId ? run.sessionId.slice(0, 16) : '']
     .filter(Boolean)
     .join(' · ');
 
@@ -454,6 +458,15 @@ async function loadRuns() {
     if (data.storage) {
       const mb = (data.storage.bytes / 1024 / 1024).toFixed(1);
       el('storage-info').textContent = '磁盘 ' + mb + ' MB · ' + data.storage.runs + ' 条 · 已压缩 ' + (data.storage.compressed || 0);
+    }
+    if (data.totals) {
+      const t = data.totals;
+      el('token-total').textContent = t.runs
+        ? 'Σ ' + formatTokens(t.total) + ' tok（出 ' + formatTokens(t.output) + '）· ' + t.outputPerSecond + ' tok/s · ' + t.runs + ' 次'
+        : 'tokens —';
+      el('token-total').title = t.runs
+        ? '所有记录合计：输入 ' + t.input + '，输出 ' + t.output + '，缓存读 ' + (t.cacheRead || 0)
+        : '还没有带用量的记录';
     }
 
     const list = el('run-list');
@@ -515,6 +528,13 @@ async function loadRuns() {
     // The service may be restarting: keep polling instead of freezing on one error.
     el('running-count').textContent = '连接中…（' + cause.message + '）';
   }
+}
+
+function formatTokens(value) {
+  if (!Number.isFinite(value) || value <= 0) return '0';
+  if (value >= 1_000_000) return (value / 1_000_000).toFixed(1) + 'M';
+  if (value >= 1000) return (value / 1000).toFixed(1) + 'k';
+  return String(value);
 }
 
 function formatEvent(event) {

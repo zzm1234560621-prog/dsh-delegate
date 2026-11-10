@@ -377,8 +377,17 @@ function runTask(input) {
           ? `${finalReason.error.code || 'ERROR'}: ${finalReason.error.message || ''}`
           : '');
 
+      let usage = null;
+      try {
+        const usageLib = require('./usage');
+        usage = usageLib.withSpeed(usageLib.summarize(sessionId), Date.now() - started);
+      } catch {
+        usage = null;
+      }
+
       resolve({
         ok,
+        usage,
         durationMs: Date.now() - started,
         code,
         sessionId,

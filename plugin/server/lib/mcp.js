@@ -249,6 +249,7 @@ function startJob(meta, runner) {
           sessionId: result && result.sessionId,
           text: result && result.results ? `${result.results.length} 个子代理完成` : result && result.text,
           reason: '',
+          usage: result && result.usage,
         });
       }
       emitProgress(job);
@@ -333,11 +334,20 @@ function waitFor(job, ms) {
 
 // ---------------------------------------------------------------- rendering
 
+function formatTokens(value) {
+  if (!Number.isFinite(value) || value <= 0) return '0';
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
+  return String(value);
+}
+
 function statusLine(result) {
   const scope = result.scope ? ` · write:${result.scope}` : '';
+  const usage = result.usage
+    ? ` · ${formatTokens(result.usage.total)} tok（出 ${formatTokens(result.usage.output)}）· ${result.usage.outputPerSecond} tok/s`
+    : '';
   return (
     `[DSH ${result.ok ? 'ok' : 'failed'} · ${formatDuration(result.durationMs)} · exit ${result.code} · ` +
-    `${result.permissionMode}${scope} · ${result.sessionId || 'no-session-id'}]`
+    `${result.permissionMode}${scope}${usage} · ${result.sessionId || 'no-session-id'}]`
   );
 }
 
@@ -500,6 +510,7 @@ async function callParallel(args, ctx) {
           sessionId: result.sessionId,
           text: result.text,
           reason: result.reason,
+          usage: result.usage,
         });
         return result;
       });
