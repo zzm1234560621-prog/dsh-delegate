@@ -66,6 +66,108 @@ function installedPlugins() {
   }
 }
 
+/** pi-ai built-in providers: id -> env var that carries the key. */
+const PI_ENV = {
+  'ant-ling': 'ANT_LING_API_KEY',
+  openai: 'OPENAI_API_KEY',
+  anthropic: 'ANTHROPIC_API_KEY',
+  google: 'GEMINI_API_KEY',
+  'google-vertex': 'GOOGLE_CLOUD_API_KEY',
+  azure: 'AZURE_OPENAI_API_KEY',
+  'amazon-bedrock': 'AWS_BEARER_TOKEN_BEDROCK',
+  deepseek: 'DEEPSEEK_API_KEY',
+  xai: 'XAI_API_KEY',
+  groq: 'GROQ_API_KEY',
+  cerebras: 'CEREBRAS_API_KEY',
+  mistral: 'MISTRAL_API_KEY',
+  moonshotai: 'MOONSHOT_API_KEY',
+  'moonshotai-cn': 'MOONSHOT_API_KEY',
+  'kimi-coding': 'KIMI_API_KEY',
+  minimax: 'MINIMAX_API_KEY',
+  'minimax-cn': 'MINIMAX_CN_API_KEY',
+  zai: 'ZAI_API_KEY',
+  'zai-coding-cn': 'ZAI_CODING_CN_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
+  'vercel-ai-gateway': 'AI_GATEWAY_API_KEY',
+  together: 'TOGETHER_API_KEY',
+  fireworks: 'FIREWORKS_API_KEY',
+  baseten: 'BASETEN_API_KEY',
+  huggingface: 'HF_TOKEN',
+  nvidia: 'NVIDIA_API_KEY',
+  meta: 'META_API_KEY',
+  'qwen-token-plan': 'QWEN_TOKEN_PLAN_API_KEY',
+  'qwen-token-plan-cn': 'QWEN_TOKEN_PLAN_CN_API_KEY',
+  'qwen-token-plan-individual': 'QWEN_TOKEN_PLAN_API_KEY',
+  xiaomi: 'XIAOMI_API_KEY',
+  'cloudflare-workers-ai': 'CLOUDFLARE_API_KEY',
+  'cloudflare-ai-gateway': 'CLOUDFLARE_API_KEY',
+  opencode: 'OPENCODE_API_KEY',
+  'opencode-go': 'OPENCODE_API_KEY',
+  typesafe: 'TYPESAFE_API_KEY',
+  radius: 'RADIUS_API_KEY',
+};
+
+const PI_LABELS = {
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  google: 'Google Gemini',
+  'google-vertex': 'Google Vertex',
+  azure: 'Azure OpenAI',
+  'amazon-bedrock': 'Amazon Bedrock',
+  deepseek: 'DeepSeek（官方 API，经 pi-ai）',
+  xai: 'xAI Grok',
+  groq: 'Groq',
+  cerebras: 'Cerebras',
+  mistral: 'Mistral',
+  moonshotai: 'Moonshot / Kimi',
+  'moonshotai-cn': 'Moonshot / Kimi（国内）',
+  'kimi-coding': 'Kimi Coding',
+  minimax: 'MiniMax',
+  'minimax-cn': 'MiniMax（国内）',
+  zai: 'Z.ai / GLM',
+  'zai-coding-cn': 'Z.ai Coding（国内）',
+  openrouter: 'OpenRouter',
+  'vercel-ai-gateway': 'Vercel AI Gateway',
+  together: 'Together AI',
+  fireworks: 'Fireworks AI',
+  baseten: 'Baseten',
+  huggingface: 'Hugging Face',
+  nvidia: 'NVIDIA',
+  meta: 'Meta',
+  'qwen-token-plan': 'Qwen Token Plan',
+  'qwen-token-plan-cn': 'Qwen Token Plan（国内）',
+  'qwen-token-plan-individual': 'Qwen Token Plan（个人）',
+  xiaomi: 'Xiaomi',
+  'cloudflare-workers-ai': 'Cloudflare Workers AI',
+  'cloudflare-ai-gateway': 'Cloudflare AI Gateway',
+  opencode: 'OpenCode',
+  'opencode-go': 'OpenCode Go（内置直连）',
+  typesafe: 'Typesafe',
+  radius: 'Radius',
+};
+
+const PI_AI_PLUGIN = '@deepseek-ai/dsh-llm-pi-ai';
+const PI_START = '# dsh-delegate:pi-ai:start';
+const PI_END = '# dsh-delegate:pi-ai:end';
+
+function isPiProvider(id) {
+  return Object.prototype.hasOwnProperty.call(PI_ENV, id);
+}
+
+/** Every provider the dashboard offers: DSH plugins first, then the pi-ai catalog. */
+function providerList() {
+  const pluginProviders = PROVIDERS.slice();
+  const piProviders = Object.keys(PI_ENV).map((id) => ({
+    id,
+    label: PI_LABELS[id] || id,
+    plugin: PI_AI_PLUGIN,
+    kind: 'pi-ai',
+    envKey: PI_ENV[id],
+    models: [],
+  }));
+  return [...pluginProviders, ...piProviders];
+}
+
 /** Providers we know how to hint about; anything else can still be typed in. */
 const PROVIDERS = [
   {
@@ -85,6 +187,7 @@ const PROVIDERS = [
 ];
 
 function providerAvailable(provider) {
+  if (provider.kind === 'pi-ai') return true;
   if (!provider.plugin) return true;
   const { dependencies, bundles } = installedPlugins();
   return dependencies.includes(provider.plugin) || bundles.includes(provider.plugin);
@@ -135,6 +238,31 @@ function renderModelBlock({ provider, model, reasoningEffort }) {
   ].join('\n');
 }
 
+function renderPiBlock(provider) {
+  return [
+    PI_START,
+    '- id: llm-pi-ai',
+    '  name: "@deepseek-ai/dsh-llm-pi-ai"',
+    '  config:',
+    '    providers:',
+    `      ${quote(provider)}:`,
+    `        apiKeyEnv: ${quote(PI_ENV[provider] || '')}`,
+    PI_END,
+  ].join('\n');
+}
+
+function upsertPiBlock(text, provider) {
+  const start = text.indexOf(PI_START);
+  const end = text.indexOf(PI_END);
+  const block = provider && isPiProvider(provider) ? `${renderPiBlock(provider)}\n` : '';
+  if (start !== -1 && end > start) {
+    const after = text.slice(end + PI_END.length).replace(/^\n/, '');
+    return `${text.slice(0, start)}${block}${after}`;
+  }
+  if (!block) return text;
+  return `${text.replace(/\s*$/, '')}${text.trim().length ? '\n\n' : ''}${block}`;
+}
+
 function writeModel(input) {
   const provider = String(input.provider || '').trim();
   const model = String(input.model || '').trim();
@@ -155,6 +283,7 @@ function writeModel(input) {
   } else {
     next = `${existing.replace(/\s*$/, '')}${existing.trim().length ? '\n\n' : ''}${block}`;
   }
+  next = upsertPiBlock(next, provider);
   fs.writeFileSync(file, next);
   return readModel();
 }
@@ -266,13 +395,25 @@ function state() {
     model,
     settings: readSettings(),
     settingsFile: settingsFile(),
-    providers: PROVIDERS.map((provider) => ({
+    providers: providerList().map((provider) => ({
       id: provider.id,
       label: provider.label,
       plugin: provider.plugin,
       available: providerAvailable(provider),
       envKey: provider.envKey,
-      models: provider.models,
+      models: provider.models.length
+        ? provider.models
+        : (() => {
+            try {
+              return require('./piai')
+                .modelsFor(provider.id)
+                .slice(0, 200)
+                .map((model) => model.id);
+            } catch {
+              return [];
+            }
+          })(),
+      kind: provider.kind || 'plugin',
       hasCredential: env.keys.some((key) => key.name === provider.envKey && key.hasValue),
     })),
     reasoning: REASONING,
