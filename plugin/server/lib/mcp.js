@@ -83,10 +83,11 @@ const TOOLS = [
           enum: ['never', 'ask'],
           description: '省略时用本机设置。ask 需要有人应答，headless 下没人应答会一直等到超时。',
         },
-        timeout_ms: { type: 'number', description: 'DSH 自身超时毫秒，默认 600000。' },
+        timeout_ms: { type: 'number', description: 'DSH 自身超时毫秒；默认 0 = 不限制。' },
+        no_web: { type: 'boolean', description: '为这次调用禁用联网工具（默认 false，可联网）。' },
         soft_wait_ms: {
           type: 'number',
-          description: `本次调用最多等多久再交还 job id，默认 ${DEFAULT_SOFT_WAIT_MS}，不设上限。`,
+          description: `本次调用最多等多久再交还 job id，默认 ${DEFAULT_SOFT_WAIT_MS}；0 = 一直等到结束。`,
         },
         mode: {
           type: 'string',
@@ -130,6 +131,7 @@ const TOOLS = [
                 description: '该任务唯一可写的子目录（相对 cwd，必须已存在）。建议每个任务都填，互不重叠。',
               },
               session_id: { type: 'string', description: '续接已有会话（一般不用）。' },
+              no_web: { type: 'boolean', description: '禁用联网工具，只读本地。' },
             },
             required: ['task'],
             additionalProperties: false,
@@ -146,7 +148,7 @@ const TOOLS = [
           description: '对所有任务生效；省略时用本机设置。',
         },
         approval_policy: { type: 'string', enum: ['never', 'ask'], description: '省略时用本机设置。' },
-        timeout_ms: { type: 'number', description: '每个任务的超时毫秒，默认 600000。' },
+        timeout_ms: { type: 'number', description: '每个任务的超时毫秒；默认 0 = 不限制。' },
         soft_wait_ms: {
           type: 'number',
           description: `本次调用最多等多久再交还 job id，默认 ${DEFAULT_SOFT_WAIT_MS}。`,
@@ -320,7 +322,10 @@ function emitProgress(job) {
 }
 
 function waitFor(job, ms) {
-  const budget = Number.isFinite(ms) && ms > 0 ? ms : DEFAULT_SOFT_WAIT_MS;
+  const raw = Number.isFinite(ms) ? ms : readSettings().softWaitMs;
+  // 0 = 不设上限：一直等到作业结束
+  if (raw === 0) return job.promise.then(() => 'settled');
+  const budget = raw > 0 ? raw : DEFAULT_SOFT_WAIT_MS;
   return Promise.race([
     job.promise.then(() => 'settled'),
     new Promise((resolve) => setTimeout(() => resolve('timeout'), budget).unref?.()),
@@ -432,6 +437,7 @@ async function callTask(args, ctx) {
       permissionMode: input.permission_mode || defaults.permissionMode,
       approvalPolicy: input.approval_policy || defaults.approvalPolicy,
       timeoutMs: input.timeout_ms || defaults.timeoutMs,
+      noWeb: Boolean(input.no_web),
       onEvent,
     }),
   );
@@ -487,6 +493,7 @@ async function callParallel(args, ctx) {
           permissionMode: task.permission_mode || input.permission_mode || defaults.permissionMode,
           approvalPolicy: task.approval_policy || input.approval_policy || defaults.approvalPolicy,
           timeoutMs: task.timeout_ms || input.timeout_ms || defaults.timeoutMs,
+        noWeb: Boolean(task.no_web || input.no_web),
           onEvent: (event) => {
             recordEvent(taskRun, event);
             onEvent({ ...event, __task: task.title || '' });

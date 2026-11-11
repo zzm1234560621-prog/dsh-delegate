@@ -251,11 +251,11 @@
       <div>
         <label for="softwait">单次调用最多等多久（毫秒）</label>
         <input id="softwait" type="number" min="1" step="1000" />
-        <div class="hint">超过就交还 job id，让模型用 dsh_job 继续等。</div>
+        <div class="hint">超过就交还 job id；0 = 一直等到结束。</div>
       </div>
       <div>
-        <label for="timeout">DSH 自身超时（毫秒）</label>
-        <input id="timeout" type="number" min="1" step="10000" />
+        <label for="timeout">DSH 自身超时（毫秒，0 = 不限）</label>
+        <input id="timeout" type="number" min="0" step="10000" placeholder="0 = 不限制" />
       </div>
       <div>
         <label for="concurrency">并行上限</label>

@@ -10,7 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
-const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+const DEFAULT_TIMEOUT_MS = 0; // 0 = 不设超时，跑完为止
 
 /** Live worker processes, so the MCP server can clean up on exit. */
 const liveChildren = new Set();
@@ -305,13 +305,34 @@ function runTask(input) {
 
     const permissionMode = opts.permissionMode || 'workspace-write';
     const approvalPolicy = opts.approvalPolicy || 'never';
-    // No upper bound: an explicit timeout_ms is honoured as given.
-    const timeoutMs = Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0 ? opts.timeoutMs : DEFAULT_TIMEOUT_MS;
+    // 0 (the default) means no timer at all: the worker runs until it finishes.
+    const timeoutMs = Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0 ? opts.timeoutMs : 0;
+
+    // noWeb: disable the web tool rows for this run only, through a --patch overlay.
+    let patchFile = null;
+    if (opts.noWeb) {
+      try {
+        patchFile = path.join(os.tmpdir(), `dsh-delegate-no-web-${process.pid}-${Date.now()}.yml`);
+        fs.writeFileSync(
+          patchFile,
+          [
+            '- id: tool-web',
+            '  disabled: true',
+            '- id: web',
+            '  disabled: true',
+            '',
+          ].join('\n'),
+        );
+      } catch {
+        patchFile = null;
+      }
+    }
 
     const args = [
       ...launch.argsPrefix,
       '--profile',
       'headless',
+      ...(patchFile ? ['--patch', patchFile] : []),
       '--json',
       '--permission-mode',
       permissionMode,
@@ -401,7 +422,7 @@ function runTask(input) {
       });
     };
 
-    const timer = setTimeout(() => {
+    const timer = timeoutMs > 0 ? setTimeout(() => {
       try {
         child.kill();
       } catch {
@@ -421,7 +442,7 @@ function runTask(input) {
         scope: scopeRel,
         cwd,
       });
-    }, timeoutMs + 5000);
+    }, timeoutMs + 5000) : null;
 
     child.on('error', (cause) => {
       if (settled) return;
@@ -472,6 +493,13 @@ function runTask(input) {
     liveChildren.add(child);
     child.on('close', (code) => {
       liveChildren.delete(child);
+      if (patchFile) {
+        try {
+          fs.rmSync(patchFile, { force: true });
+        } catch {
+          /* ignore */
+        }
+      }
       finish(code === null ? 'killed' : code);
     });
 

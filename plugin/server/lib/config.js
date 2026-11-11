@@ -24,7 +24,7 @@ const DEFAULT_SETTINGS = {
   permissionMode: 'workspace-write',
   approvalPolicy: 'never',
   softWaitMs: 45_000,
-  timeoutMs: 600_000,
+  timeoutMs: 0, // 0 = 不限制
   maxConcurrency: 0, // 0 = 不限制，一次把任务全放出去
   maxStorageMb: 0, // 0 = 不限制
   daemonPort: 7788,
@@ -344,7 +344,7 @@ function sanitizeSettings(input) {
   if (APPROVAL_POLICIES.includes(input.approvalPolicy)) out.approvalPolicy = input.approvalPolicy;
   // No upper bounds: these are knobs, not policy.
   if (Number.isFinite(input.softWaitMs)) out.softWaitMs = Math.max(Math.floor(input.softWaitMs), 1);
-  if (Number.isFinite(input.timeoutMs)) out.timeoutMs = Math.max(Math.floor(input.timeoutMs), 1);
+  if (Number.isFinite(input.timeoutMs)) out.timeoutMs = Math.max(Math.floor(input.timeoutMs), 0);
   if (Number.isFinite(input.maxConcurrency)) {
     out.maxConcurrency = input.maxConcurrency <= 0 ? 0 : Math.max(Math.floor(input.maxConcurrency), 1);
   }
