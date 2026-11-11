@@ -26,7 +26,7 @@ const DEFAULT_SETTINGS = {
   softWaitMs: 45_000,
   timeoutMs: 600_000,
   maxConcurrency: 0, // 0 = 不限制，一次把任务全放出去
-  maxStorageMb: 256,
+  maxStorageMb: 0, // 0 = 不限制
   daemonPort: 7788,
   daemonUi: true,
   daemonAutostart: false,
@@ -342,12 +342,13 @@ function sanitizeSettings(input) {
   if (!input || typeof input !== 'object') return out;
   if (PERMISSION_MODES.includes(input.permissionMode)) out.permissionMode = input.permissionMode;
   if (APPROVAL_POLICIES.includes(input.approvalPolicy)) out.approvalPolicy = input.approvalPolicy;
-  if (Number.isFinite(input.softWaitMs)) out.softWaitMs = Math.min(Math.max(Math.floor(input.softWaitMs), 1_000), 150_000);
-  if (Number.isFinite(input.timeoutMs)) out.timeoutMs = Math.min(Math.max(Math.floor(input.timeoutMs), 30_000), 1_800_000);
+  // No upper bounds: these are knobs, not policy.
+  if (Number.isFinite(input.softWaitMs)) out.softWaitMs = Math.max(Math.floor(input.softWaitMs), 1);
+  if (Number.isFinite(input.timeoutMs)) out.timeoutMs = Math.max(Math.floor(input.timeoutMs), 1);
   if (Number.isFinite(input.maxConcurrency)) {
     out.maxConcurrency = input.maxConcurrency <= 0 ? 0 : Math.max(Math.floor(input.maxConcurrency), 1);
   }
-  if (Number.isFinite(input.maxStorageMb)) out.maxStorageMb = Math.min(Math.max(Math.floor(input.maxStorageMb), 1), 20480);
+  if (Number.isFinite(input.maxStorageMb)) out.maxStorageMb = Math.max(Math.floor(input.maxStorageMb), 0); // 0 = 不限制
   if (Number.isFinite(input.daemonPort)) out.daemonPort = Math.min(Math.max(Math.floor(input.daemonPort), 1024), 65535);
   if (typeof input.daemonUi === 'boolean') out.daemonUi = input.daemonUi;
   if (typeof input.daemonAutostart === 'boolean') out.daemonAutostart = input.daemonAutostart;

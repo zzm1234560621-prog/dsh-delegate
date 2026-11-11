@@ -63,8 +63,6 @@ function append(record, event) {
   if (!record) return;
   try {
     fs.appendFileSync(eventsFile(record.id), `${JSON.stringify({ t: Date.now(), ...event })}\n`);
-    record.writes = (record.writes || 0) + 1;
-    if (record.writes % 100 === 0) trimEvents(record);
     if (event.kind === 'tool') {
       record.toolCalls = (record.toolCalls || 0) + 1;
       record.lastNote = `${event.name || 'tool'}${event.detail ? `：${String(event.detail).slice(0, 60)}` : ''}`;
@@ -209,8 +207,6 @@ function listRuns(limit = 20) {
   return runs.slice(0, limit);
 }
 
-const MAX_STORAGE_MB = 256;
-const MAX_EVENT_BYTES = 2 * 1024 * 1024;
 let lastPrune = 0;
 
 function sizeOf(file) {
@@ -228,7 +224,9 @@ function sizeOf(file) {
  */
 function prune(options = {}) {
   const settings = readSettings();
-  const limitBytes = options.maxBytes || (settings.maxStorageMb || MAX_STORAGE_MB) * 1024 * 1024;
+  const limitBytes =
+    options.maxBytes || (settings.maxStorageMb > 0 ? settings.maxStorageMb * 1024 * 1024 : 0);
+  if (!limitBytes) return; // 0 = 不限制
   try {
     const entries = fs
       .readdirSync(dir())
@@ -260,17 +258,6 @@ function prune(options = {}) {
   lastPrune = Date.now();
 }
 
-/** Keep one run's event file bounded while it is still being written. */
-function trimEvents(record) {
-  const file = eventsFile(record.id);
-  if (sizeOf(file) < MAX_EVENT_BYTES) return;
-  try {
-    const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean);
-    fs.writeFileSync(file, `${lines.slice(-800).join('\n')}\n`);
-  } catch {
-    /* ignore */
-  }
-}
 
 function storageInfo() {
   ensureDir();

@@ -250,12 +250,12 @@
       </div>
       <div>
         <label for="softwait">单次调用最多等多久（毫秒）</label>
-        <input id="softwait" type="number" min="1000" max="150000" step="1000" />
+        <input id="softwait" type="number" min="1" step="1000" />
         <div class="hint">超过就交还 job id，让模型用 dsh_job 继续等。</div>
       </div>
       <div>
         <label for="timeout">DSH 自身超时（毫秒）</label>
-        <input id="timeout" type="number" min="30000" max="1800000" step="10000" />
+        <input id="timeout" type="number" min="1" step="10000" />
       </div>
       <div>
         <label for="concurrency">并行上限</label>
@@ -264,8 +264,8 @@
       </div>
       <div>
         <label for="storage">运行记录最多占多少 MB</label>
-        <input id="storage" type="number" min="16" max="20480" step="16" />
-        <div class="hint">按磁盘大小滚动删除最旧的记录；1024 = 1 GB，0 不保留也行（最小 16）。</div>
+        <input id="storage" type="number" min="0" step="16" placeholder="0 = 不限制" />
+        <div class="hint">按磁盘大小滚动删除最旧的记录；0 = 不限制，1024 = 1 GB。</div>
       </div>
       <div style="display:flex; align-items:flex-end;">
         <button id="save-settings">保存默认值</button>
