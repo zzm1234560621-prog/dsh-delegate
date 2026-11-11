@@ -7,7 +7,7 @@
 ```
 Claude Desktop ─┐
 Claude Code  ───┼─ MCP (stdio) ─→ dsh-delegate ─→ dsh --profile headless ─→ 子代理干活
-Codex        ───┘                                    （可并行 3-5 个，各带写作用域）
+Codex        ───┘                                    （并发不限，各带写作用域）
 ```
 
 ## 为什么不是「直接把任务塞给 web 版」

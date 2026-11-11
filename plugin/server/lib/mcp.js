@@ -19,8 +19,7 @@ const runlog = require('./runlog');
 
 const SERVER_INFO = { name: 'dsh-delegate', version: '1.1.0' };
 const PROTOCOL_FALLBACK = '2024-11-05';
-const MAX_PARALLEL_TASKS = 8;
-const DEFAULT_CONCURRENCY = 4;
+const DEFAULT_CONCURRENCY = 0; // 0 = 不限制
 const PER_TASK_CHARS = 5000;
 const TOTAL_CHARS = 22000;
 const DEFAULT_SOFT_WAIT_MS = 45_000;
@@ -108,7 +107,7 @@ const TOOLS = [
     description: [
       '一次派出多个 DSH 子代理并行干活，全部结束后按编号汇总每份结果。用来把大活拆成互不依赖的几块同时推进。',
       '',
-      '什么时候用：2 件以上互不依赖的活（各自改不同目录、各自查不同问题、各自跑不同检查）。3-5 个最划算。',
+      '什么时候用：2 件以上互不依赖的活（各自改不同目录、各自查不同问题、各自跑不同检查）。默认不限制并发，全部同时跑。',
       '',
       '关键约束：子代理共享同一个仓库，**能读整个仓库**（相互查看），但每个任务只应写自己的目录。',
       '给每个任务填 write_scope，沙箱会把写边界收缩到那里，越界写会被拒绝。',
@@ -122,7 +121,6 @@ const TOOLS = [
         tasks: {
           type: 'array',
           minItems: 1,
-          maxItems: MAX_PARALLEL_TASKS,
           description: '要并行派出的任务列表。',
           items: {
             type: 'object',
@@ -143,7 +141,7 @@ const TOOLS = [
         cwd: { type: 'string', description: '所有任务的默认工作目录。' },
         max_concurrency: {
           type: 'number',
-          description: `并发上限，默认 ${DEFAULT_CONCURRENCY}，最大 ${MAX_PARALLEL_TASKS}。`,
+          description: '并发上限。省略或 0 = 不限制，全部同时跑。',
         },
         permission_mode: {
           type: 'string',
@@ -456,18 +454,12 @@ async function callParallel(args, ctx) {
   const input = args || {};
   const tasks = Array.isArray(input.tasks) ? input.tasks : [];
   if (tasks.length === 0) return textResult('tasks 不能为空。', true);
-  if (tasks.length > MAX_PARALLEL_TASKS) {
-    return textResult(`一次最多 ${MAX_PARALLEL_TASKS} 个任务，收到 ${tasks.length} 个。`, true);
-  }
 
   const defaults = readSettings();
-  const limit = Math.min(
-    Math.max(
-      Number.isFinite(input.max_concurrency) ? Math.floor(input.max_concurrency) : defaults.maxConcurrency || DEFAULT_CONCURRENCY,
-      1,
-    ),
-    MAX_PARALLEL_TASKS,
-  );
+  const requested = Number.isFinite(input.max_concurrency)
+    ? Math.floor(input.max_concurrency)
+    : Number(defaults.maxConcurrency || 0);
+  const limit = requested > 0 ? Math.min(requested, tasks.length) : tasks.length;
   const startedAt = Date.now();
 
   const job = startJob(

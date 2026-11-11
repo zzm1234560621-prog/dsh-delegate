@@ -259,8 +259,8 @@
       </div>
       <div>
         <label for="concurrency">并行上限</label>
-        <input id="concurrency" type="number" min="1" max="8" step="1" />
-        <div class="hint">dsh_parallel 没显式指定时用这个。</div>
+        <input id="concurrency" type="number" min="0" step="1" placeholder="0 = 不限制" />
+        <div class="hint">0 = 一次全部放出去；填数字才限流。</div>
       </div>
       <div>
         <label for="storage">运行记录最多占多少 MB</label>
