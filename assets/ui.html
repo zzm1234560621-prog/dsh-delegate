@@ -263,6 +263,52 @@
     <p class="hint">写入 <span class="mono" id="patch-path"></span> 里的标记块，下次派活生效。</p>
   </section>
 
+<section>
+    <h2><span class="dot"></span>派活默认值（权限 / 审批 / 等待）</h2>
+    <div class="grid">
+      <div>
+        <label for="perm">沙箱模式</label>
+        <select id="perm">
+          <option value="workspace-write">workspace-write — 只能写工作目录 / write_scope 内</option>
+          <option value="danger-full-access">danger-full-access — 不限制写入范围</option>
+        </select>
+        <div class="hint">子代理默认在工作目录里跑；这一项决定它能写多远。</div>
+      </div>
+      <div>
+        <label for="approval">审批策略</label>
+        <select id="approval">
+          <option value="never">never — 无人值守，需要审批的调用直接拒绝</option>
+          <option value="ask">ask — 需要人工批准（headless 没人应答会等到超时）</option>
+        </select>
+        <div class="hint">选 ask 时建议把超时调小，避免一直挂着。</div>
+      </div>
+      <div>
+        <label for="softwait">单次调用最多等多久（毫秒）</label>
+        <input id="softwait" type="number" min="1" step="1000" />
+        <div class="hint">超过就交还 job id；0 = 一直等到结束。</div>
+      </div>
+      <div>
+        <label for="timeout">DSH 自身超时（毫秒，0 = 不限）</label>
+        <input id="timeout" type="number" min="0" step="10000" placeholder="0 = 不限制" />
+      </div>
+      <div>
+        <label for="concurrency">并行上限</label>
+        <input id="concurrency" type="number" min="0" step="1" placeholder="0 = 不限制" />
+        <div class="hint">0 = 一次全部放出去；填数字才限流。</div>
+      </div>
+      <div>
+        <label for="storage">运行记录最多占多少 MB</label>
+        <input id="storage" type="number" min="0" step="16" placeholder="0 = 不限制" />
+        <div class="hint">按磁盘大小滚动删除最旧的记录；0 = 不限制，1024 = 1 GB。</div>
+      </div>
+      <div style="display:flex; align-items:flex-end;">
+        <button id="save-settings">保存默认值</button>
+      </div>
+    </div>
+    <div class="msg" id="settings-msg"></div>
+    <p class="hint">存在 <span class="mono" id="settings-path"></span>；MCP 每次调用都会重读，改完不用重启客户端。也可以用环境变量 <span class="mono">DSH_DELEGATE_PERMISSION_MODE</span> / <span class="mono">DSH_DELEGATE_APPROVAL_POLICY</span> 给单个客户端单独覆盖。</p>
+  </section>
+
   <section>
     <h2><span class="dot"></span>子代理实时看板</h2>
     <div class="row" style="gap:10px; flex-wrap:wrap; margin-bottom:10px;">
@@ -919,7 +965,6 @@ function updateProviderHint(keepModel) {
 
   const fill = el('fill-env');
   if (provider.envKey) {
-    el('env-key-label').textContent = provider.envKey;
     fill.hidden = false;
     // Never look like something is missing when it is already configured.
     fill.textContent = provider.hasCredential
