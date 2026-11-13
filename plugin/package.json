@@ -1,7 +1,7 @@
 {
   "name": "dsh-delegate",
-  "version": "1.1.0",
-  "description": "Delegate mechanical tasks from a strong model to a local DeepSeek Harness subagent: parallel fan-out, write scopes, long-job polling, plus a local dashboard.",
+  "version": "1.2.0",
+  "description": "Delegate mechanical tasks from a strong model to a local DeepSeek Harness subagent: parallel fan-out, write scopes, long-job polling, plus a local dashboard. Installing the bundle also wires Claude Desktop / Claude Code / Codex to the same MCP server.",
   "type": "module",
   "license": "MIT",
   "keywords": [
@@ -10,15 +10,18 @@
     "deepseek",
     "harness",
     "mcp",
+    "claude",
     "subagent",
     "delegation"
   ],
   "exports": {
+    ".": "./index.js",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg",
     "./server/*": "./server/*"
   },
   "files": [
+    "index.js",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",

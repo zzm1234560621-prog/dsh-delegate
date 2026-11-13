@@ -1,11 +1,19 @@
-# Mount the bundled MCP server for this profile, so every session in it can hand
-# mechanical work to a local DSH subagent.
+# Two rows:
+#   1. a host plugin that wires external clients (Claude Desktop / Claude Code /
+#      Codex) to the bundled MCP server on startup, so installing only this bundle
+#      is enough to call DSH from Claude;
+#   2. the MCP client that exposes the tools inside DSH itself.
 #
-# The server ships inside this bundle (server/lib/mcp.js). Path resolution checks
-# existence instead of trusting DSH_PROFILE_DIR: a shell that already exported it
-# for another profile would otherwise point at the wrong node_modules. Fallback is
-# the standalone installer deployment under $DSH_HOME/bridge.
+# Server path resolution checks existence instead of trusting DSH_PROFILE_DIR: a
+# shell that already exported it for another profile would otherwise point at the
+# wrong node_modules. Fallback is the standalone installer deployment under
+# $DSH_HOME/bridge.
 - insert:
+    - id: dsh-delegate-bootstrap
+      name: dsh-delegate
+      config:
+        wireClients: true
+
     - id: dsh-delegate-mcp
       name: '@deepseek-ai/dsh-mcp-client'
       config:
