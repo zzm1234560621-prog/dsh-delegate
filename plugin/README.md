@@ -1,49 +1,54 @@
-# DSH Delegate (plugin bundle)
+# DSH Delegate（插件包）
 
-A **configuration-only DSH bundle** that mounts [dsh-delegate](../README.md) as an MCP
-server inside a profile. After install, every session in that profile gets:
+把这个 bundle 装进一个 DSH profile 后，会发生两件事：
 
-- `mcp__dsh__dsh_task` — hand one self-contained task to a local subagent
-- `mcp__dsh__dsh_parallel` — fan out several tasks with per-task write scopes
-- `mcp__dsh__dsh_job` — keep polling long runs instead of timing out
+1. **对外接线**：DSH 启动时把 **Claude Desktop / Claude Code / Codex** 的 MCP 配置写成指向本机
+   dsh-delegate 服务（幂等、写前备份）。所以「在 DSH 里装个插件」就够让 Claude 调 DSH，
+   不用再跑安装脚本。
+2. **页内面板**：在 DSH 输入框上方注册一个面板，显示服务状态、运行中数量、token 合计和最近运行，
+   并可以一键打开完整看板。
 
-The MCP server ships inside this package (`server/lib/mcp.js`), so no separate
-installer is required for the plugin path.
+DSH 自己的子代理（`subagent` / `subagent_workflow`）不受影响——这个插件不会往 DSH 里插 MCP 客户端。
 
-## Install
+## 安装
 
 ```bash
-# from this directory
-dsh plugin --profile <profile> add "file:$(pwd)"
+# 本地目录
+dsh plugin --profile <profile> add "file:/path/to/dsh-delegate/plugin"
 
-# or once published to npm
+# 发布到 npm 之后
 dsh plugin --profile <profile> add dsh-delegate
+
+# 仓库公开后
+dsh plugin --profile <profile> add "github:zzm1234560621-prog/dsh-delegate#path:/plugin"
 ```
 
-Then restart that profile (Desktop: quit the app and reopen). `dsh --profile <profile> --dump-config`
-should show the inserted `dsh-delegate-mcp` row.
+装完重启该 profile。
 
-## Requirements
+## 配置
 
-- DSH 0.2.1-rc.5 or newer (uses `@deepseek-ai/dsh-mcp-client`)
-- An API key the headless profile can read: `$DSH_HOME/.env` or the launching
-  environment (`DEEPSEEK_API_KEY`, or your provider's variable)
+```yaml
+- id: dsh-delegate-bootstrap
+  name: dsh-delegate
+  config:
+    wireClients: true      # false = 只装 DSH 侧，不写任何外部客户端配置
+```
 
-## What it does not do
+## 要求
 
-The plugin only mounts the MCP tools. The standalone installer adds more:
-the `dsh` CLI shim, the skill/instruction files, client wiring for Claude Desktop /
-Claude Code / Codex, and the local dashboard (`dsh-delegate ui`). Run
-`dsh-delegate install` if you want those too.
+- DSH ≥ 0.2.1-rc.5
+- 一个 headless 能读到的 API key：`$DSH_HOME/.env` 或启动环境（`DEEPSEEK_API_KEY` 等）
+- 对外接线需要本机有 `node`（会在 PATH 里找；也可以用 `DSH_DELEGATE_NODE` 指定）
 
-## Files
+## 目录
 
-| Path | Purpose |
+| 路径 | 作用 |
 |---|---|
-| `cordis.patch.yml` | inserts `@deepseek-ai/dsh-mcp-client` with a stdio server pointing at `server/lib/mcp.js` |
-| `server/` | the bundled MCP server (Node ≥18, no dependencies) |
-| `locale/*.json` | plugin market title/description |
-| `icon.svg` | market artwork |
+| `cordis.patch.yml` | 只插入 `dsh-delegate-bootstrap` 一行 |
+| `index.js` | host plugin：解析 node / MCP 服务路径，写三个客户端配置 |
+| `client.js` | 页内面板（`conversation.composer.dock`） |
+| `server/lib/` | 打包好的 MCP 服务（零依赖） |
+| `locale/*.json`、`icon.svg` | 市场展示资源 |
 
 ## License
 
