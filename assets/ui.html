@@ -71,6 +71,12 @@
   .msg.ok { color: var(--ok); } .msg.err { color: var(--err); }
   @keyframes flash { 0%,100% { box-shadow: none; } 50% { box-shadow: 0 0 0 2px var(--accent); } }
   section.flash { animation: flash 1.1s ease-in-out 2; }
+  .banner {
+    display: flex; align-items: center; gap: 12px; justify-content: space-between;
+    background: #3a2a12; border: 1px solid #6b4a1c; color: #ffd48a;
+    border-radius: 10px; padding: 10px 14px; font-size: 13px;
+  }
+  .banner[hidden] { display: none; }
   .cred-block { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
   .modal {
     position: fixed; inset: 0; background: rgba(4,6,10,.72);
@@ -159,6 +165,10 @@
 </header>
 
 <main>
+  <div class="banner" id="conn-banner" hidden>
+    <span>服务未连接，正在自动重试…（数据仍在磁盘上，连上即恢复）</span>
+    <button class="ghost" id="conn-retry">立即重试</button>
+  </div>
   <section>
     <h2><span class="dot"></span>执行环境</h2>
     <dl class="kv" id="env-kv"></dl>
@@ -490,7 +500,10 @@ async function loadRuns() {
     }
   } catch (cause) {
     // The service may be restarting: keep polling instead of freezing on one error.
-    el('running-count').textContent = '连接中…（' + cause.message + '）';
+    el('running-count').textContent = '运行中 —';
+    el('total-count').textContent = '共 —';
+    el('storage-info').textContent = '磁盘 —';
+    el('token-total').textContent = 'tokens —';
   }
 }
 
@@ -920,8 +933,29 @@ function updateProviderHint(keepModel) {
   }
 }
 
+let retryTimer = null;
+
+function showDisconnected(cause) {
+  const banner = el('conn-banner');
+  if (banner) {
+    banner.hidden = false;
+    banner.querySelector('span').textContent =
+      '服务未连接：' + (cause && cause.message ? cause.message : '未知原因') + '（数据仍在磁盘上，连上即恢复）';
+  }
+  if (retryTimer) return;
+  retryTimer = setInterval(() => {
+    load().then(() => {
+      clearInterval(retryTimer);
+      retryTimer = null;
+    }).catch(() => {});
+  }, 3000);
+}
+
 async function load() {
   state = await api('/api/state');
+  const banner = el('conn-banner');
+  if (banner) banner.hidden = true;
+  if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
   const launch = state.dsh.launch;
   el('dsh-tag').textContent = launch ? ('DSH 已找到：' + (launch.kind === 'desktop' ? '桌面版' : 'CLI')) : '未找到 DSH';
   el('node-tag').textContent = 'node ' + state.dsh.node + ' · ' + state.dsh.platform;
@@ -1206,7 +1240,11 @@ function showError(cause) {
   el('dsh-tag').textContent = '状态读取失败：' + cause.message;
 }
 
-load().catch(showError);
+load().catch((cause) => {
+  showError(cause);
+  showDisconnected(cause);
+});
+el('conn-retry').addEventListener('click', () => load().catch(showDisconnected));
 
 // Poll regardless of the first load outcome, so a restarting service heals itself.
 startRunPolling();
