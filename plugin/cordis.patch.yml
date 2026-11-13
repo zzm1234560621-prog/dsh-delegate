@@ -1,27 +1,11 @@
-# Two rows:
-#   1. a host plugin that wires external clients (Claude Desktop / Claude Code /
-#      Codex) to the bundled MCP server on startup, so installing only this bundle
-#      is enough to call DSH from Claude;
-#   2. the MCP client that exposes the tools inside DSH itself.
+# DSH already has native subagents (subagent / subagent_fork / workflow), so this
+# bundle does not mount an MCP client inside DSH.
 #
-# Server path resolution checks existence instead of trusting DSH_PROFILE_DIR: a
-# shell that already exported it for another profile would otherwise point at the
-# wrong node_modules. Fallback is the standalone installer deployment under
-# $DSH_HOME/bridge.
+# It only wires *external* agent clients (Claude Desktop / Claude Code / Codex) to
+# the local DSH MCP server, so installing this bundle in DSH is enough for Claude
+# to call DSH. Set wireClients: false to opt out.
 - insert:
     - id: dsh-delegate-bootstrap
       name: dsh-delegate
       config:
         wireClients: true
-
-    - id: dsh-delegate-mcp
-      name: '@deepseek-ai/dsh-mcp-client'
-      config:
-        serverName: dsh
-        transport: stdio
-        command: !!js process.execPath
-        args:
-          - !!js "(function(){var fs=process.getBuiltinModule('fs');var p=process.getBuiltinModule('path');var h=process.env.DSH_HOME||p.join(process.env.USERPROFILE||process.env.HOME||'.','.dsh');var c=[];if(process.env.DSH_PROFILE_DIR)c.push(p.join(process.env.DSH_PROFILE_DIR,'node_modules','dsh-delegate','server','lib','mcp.js'));c.push(p.join(h,'bridge','lib','mcp.js'));for(var i=0;i<c.length;i++){if(fs.existsSync(c[i]))return c[i];}return c[c.length-1];})()"
-        env:
-          DSH_HOME: !!js "(process.env.DSH_HOME || ((process.env.USERPROFILE || process.env.HOME || '.') + '/.dsh'))"
-        failOnStartupError: false
