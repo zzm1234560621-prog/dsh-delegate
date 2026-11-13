@@ -71,6 +71,7 @@
   .msg.ok { color: var(--ok); } .msg.err { color: var(--err); }
   @keyframes flash { 0%,100% { box-shadow: none; } 50% { box-shadow: 0 0 0 2px var(--accent); } }
   section.flash { animation: flash 1.1s ease-in-out 2; }
+  .cred-block { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
   .modal {
     position: fixed; inset: 0; background: rgba(4,6,10,.72);
     display: flex; align-items: center; justify-content: center; z-index: 50; padding: 24px;
@@ -202,13 +203,12 @@
   </section>
 
   <section>
-    <h2><span class="dot"></span>执行模型</h2>
+    <h2><span class="dot"></span>执行模型与凭据</h2>
     <div class="grid">
       <div>
         <label for="provider">模型供应商</label>
         <select id="provider"></select>
         <div class="hint" id="provider-hint"></div>
-        <button class="ghost" id="fill-env" hidden>填 <span id="env-key-label">…</span> →</button>
       </div>
       <div>
         <label for="model-select">模型</label>
@@ -219,77 +219,38 @@
         <label for="effort">思考强度</label>
         <select id="effort"></select>
       </div>
-      <div style="display:flex; align-items:flex-end; gap:8px;">
-        <button id="save-model">保存</button>
-        <button class="ghost" id="reset-model">恢复默认</button>
-        <button class="ghost" id="refresh-models" title="从供应商接口重新拉取模型列表">刷新模型列表</button>
-      </div>
     </div>
-    <div class="msg" id="model-msg"></div>
+
+    <div class="cred-block" id="cred-block">
+      <div class="row" style="gap:10px; flex-wrap:wrap;">
+        <span class="pill" id="cred-state">凭据 —</span>
+        <span class="hint" style="margin:0">headless 只从启动环境、&lt;cwd&gt;/.env、$DSH_HOME/.env 取 key；<b>DSH_ 开头的变量名会被拒绝</b>。</span>
+      </div>
+      <div class="grid" style="margin-top:10px;">
+        <div><label for="env-name">变量名</label><input id="env-name" placeholder="OPENCODE_GO_ACCOUNT_KEY" /></div>
+        <div><label for="env-value">值</label><input id="env-value" type="password" placeholder="sk-… / oc_…" /></div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button id="save-env">写入 .env</button>
+        <button class="ghost" id="fill-env">用当前供应商的变量名</button>
+      </div>
+      <div class="msg" id="env-msg"></div>
+      <details style="margin-top:6px;">
+        <summary class="hint">已保存的变量（点开）</summary>
+        <table>
+          <thead><tr><th>变量</th><th>状态</th><th>位置</th></tr></thead>
+          <tbody id="env-rows"></tbody>
+        </table>
+      </details>
+    </div>
+
+    <div class="row" style="margin-top:14px; gap:8px; flex-wrap:wrap; align-items:center;">
+      <button id="save-model">保存模型</button>
+      <button class="ghost" id="reset-model">恢复默认</button>
+      <button class="ghost" id="refresh-models" title="从供应商接口重新拉取模型列表">刷新模型列表</button>
+      <span class="msg" id="model-msg" style="margin:0"></span>
+    </div>
     <p class="hint">写入 <span class="mono" id="patch-path"></span> 里的标记块，下次派活生效。</p>
-  </section>
-
-  <section>
-    <h2><span class="dot"></span>派活默认值（权限 / 审批 / 等待）</h2>
-    <div class="grid">
-      <div>
-        <label for="perm">沙箱模式</label>
-        <select id="perm">
-          <option value="workspace-write">workspace-write — 只能写工作目录 / write_scope 内</option>
-          <option value="danger-full-access">danger-full-access — 不限制写入范围</option>
-        </select>
-        <div class="hint">子代理默认在工作目录里跑；这一项决定它能写多远。</div>
-      </div>
-      <div>
-        <label for="approval">审批策略</label>
-        <select id="approval">
-          <option value="never">never — 无人值守，需要审批的调用直接拒绝</option>
-          <option value="ask">ask — 需要人工批准（headless 没人应答会等到超时）</option>
-        </select>
-        <div class="hint">选 ask 时建议把超时调小，避免一直挂着。</div>
-      </div>
-      <div>
-        <label for="softwait">单次调用最多等多久（毫秒）</label>
-        <input id="softwait" type="number" min="1" step="1000" />
-        <div class="hint">超过就交还 job id；0 = 一直等到结束。</div>
-      </div>
-      <div>
-        <label for="timeout">DSH 自身超时（毫秒，0 = 不限）</label>
-        <input id="timeout" type="number" min="0" step="10000" placeholder="0 = 不限制" />
-      </div>
-      <div>
-        <label for="concurrency">并行上限</label>
-        <input id="concurrency" type="number" min="0" step="1" placeholder="0 = 不限制" />
-        <div class="hint">0 = 一次全部放出去；填数字才限流。</div>
-      </div>
-      <div>
-        <label for="storage">运行记录最多占多少 MB</label>
-        <input id="storage" type="number" min="0" step="16" placeholder="0 = 不限制" />
-        <div class="hint">按磁盘大小滚动删除最旧的记录；0 = 不限制，1024 = 1 GB。</div>
-      </div>
-      <div style="display:flex; align-items:flex-end;">
-        <button id="save-settings">保存默认值</button>
-      </div>
-    </div>
-    <div class="msg" id="settings-msg"></div>
-    <p class="hint">存在 <span class="mono" id="settings-path"></span>；MCP 每次调用都会重读，改完不用重启客户端。也可以用环境变量 <span class="mono">DSH_DELEGATE_PERMISSION_MODE</span> / <span class="mono">DSH_DELEGATE_APPROVAL_POLICY</span> 给单个客户端单独覆盖。</p>
-  </section>
-
-  <section id="cred-card">
-    <h2><span class="dot"></span>凭据</h2>
-    <table>
-      <thead><tr><th>变量</th><th>状态</th><th>位置</th></tr></thead>
-      <tbody id="env-rows"></tbody>
-    </table>
-    <div class="grid" style="margin-top:12px;">
-      <div><label for="env-name">变量名</label><input id="env-name" placeholder="OPENCODE_GO_ACCOUNT_KEY" /></div>
-      <div><label for="env-value">值</label><input id="env-value" type="password" placeholder="sk-… / oc_…" /></div>
-    </div>
-    <div class="row" style="margin-top:10px;">
-      <button id="save-env">写入 .env</button>
-      <span class="hint" style="margin:0">headless 只从启动环境、&lt;cwd&gt;/.env、$DSH_HOME/.env 取 key；<b>DSH_ 开头的变量名会被拒绝</b>。</span>
-    </div>
-    <div class="msg" id="env-msg"></div>
   </section>
 
   <section>
@@ -757,6 +718,16 @@ function renderEnv() {
     const statusCell = document.createElement('td');
     statusCell.appendChild(pill(!key.reserved, key.hasValue ? '已设置' : '空值'));
     if (key.reserved) statusCell.appendChild(document.createTextNode(' DSH 保留，会被拒绝'));
+    const selected = el('provider') && el('provider').value;
+    const provider = state.config.providers.find((item) => item.id === selected);
+    if (provider && provider.envKey === key.name) {
+      const badge = document.createElement('span');
+      badge.className = 'pill ok';
+      badge.textContent = '当前供应商使用';
+      statusCell.appendChild(document.createTextNode(' '));
+      statusCell.appendChild(badge);
+    }
+
     const where = document.createElement('td');
     where.className = 'hint';
     where.textContent = state.config.env.file;
@@ -908,17 +879,42 @@ function updateProviderHint(keepModel) {
   const live = catalogFor(id);
   const parts = [];
   parts.push(provider.available ? '插件已安装' : '插件未安装 → dsh plugin --profile headless add ' + provider.plugin);
-  parts.push(provider.hasCredential ? '凭据已设置' : '缺少 ' + provider.envKey);
+  parts.push(
+    provider.envKey
+      ? provider.hasCredential
+        ? '使用 ' + provider.envKey + '（已设置）'
+        : '缺 ' + provider.envKey + '（未设置）'
+      : '无需 API key',
+  );
   if (live.length) parts.push('接口返回 ' + live.length + ' 个模型');
   else if (catalogs.errors && catalogs.errors[id]) parts.push('拉取失败：' + catalogs.errors[id]);
   hint.textContent = parts.join(' · ');
+
+  const credState = el('cred-state');
+  if (credState) {
+    if (!provider.envKey) {
+      credState.className = 'pill';
+      credState.textContent = '该供应商不需要 API key';
+    } else if (provider.hasCredential) {
+      credState.className = 'pill ok';
+      credState.textContent = provider.envKey + ' · 已设置';
+    } else {
+      credState.className = 'pill warn';
+      credState.textContent = provider.envKey + ' · 未设置';
+    }
+  }
 
   const fill = el('fill-env');
   if (provider.envKey) {
     el('env-key-label').textContent = provider.envKey;
     fill.hidden = false;
-    fill.disabled = provider.hasCredential;
-    fill.title = provider.hasCredential ? '这个变量已有值，仍可覆盖' : '';
+    // Never look like something is missing when it is already configured.
+    fill.textContent = provider.hasCredential
+      ? '更换 ' + provider.envKey
+      : '去填 ' + provider.envKey + ' →';
+    fill.title = provider.hasCredential
+      ? '这个变量已有值；点这里可以覆盖'
+      : '这个变量还没有值';
   } else {
     fill.hidden = true;
   }
@@ -975,18 +971,21 @@ window.addEventListener('resize', () => {
   if (resizeTimer) clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => { loadRuns(); }, 200);
 });
-el('provider').addEventListener('change', () => updateProviderHint(false));
+el('provider').addEventListener('change', () => {
+  updateProviderHint(false);
+  if (state && state.config) renderEnv();
+});
 el('fill-env').addEventListener('click', () => {
   const provider = state.config.providers.find((item) => item.id === el('provider').value);
   if (!provider || !provider.envKey) return;
   el('env-name').value = provider.envKey;
   el('env-value').value = '';
-  const card = el('cred-card');
-  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  card.classList.remove('flash');
-  void card.offsetWidth; // restart the animation
-  card.classList.add('flash');
-  setTimeout(() => card.classList.remove('flash'), 2400);
+  const block = el('cred-block');
+  block.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  block.classList.remove('flash');
+  void block.offsetWidth;
+  block.classList.add('flash');
+  setTimeout(() => block.classList.remove('flash'), 2400);
   el('env-value').focus();
 });
 
