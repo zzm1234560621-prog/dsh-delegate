@@ -20,9 +20,21 @@ function page() {
   return fs.readFileSync(path.join(__dirname, '..', 'assets', 'ui.html'), 'utf8');
 }
 
+function corsHeaders() {
+  return {
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET, POST, OPTIONS',
+    'access-control-allow-headers': 'content-type',
+  };
+}
+
 function json(res, status, body) {
   const payload = JSON.stringify(body);
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+  res.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+    ...corsHeaders(),
+  });
   res.end(payload);
 }
 
@@ -303,6 +315,11 @@ function start(options = {}) {
       const html = page();
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(html);
+      return;
+    }
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, corsHeaders());
+      res.end();
       return;
     }
     if (url.pathname.startsWith('/api/')) {
