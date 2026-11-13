@@ -108,6 +108,17 @@ function applyClaudeDesktop(ctx, options) {
 }
 
 function applyClaudeCode(ctx, options) {
+  // Check the config before touching it: the `claude` CLI would happily rewrite a
+  // corrupt ~/.claude.json and take the user's settings with it.
+  const file = path.join(home(), '.claude.json');
+  if (fs.existsSync(file) && !readJson(file)) {
+    return {
+      target: 'claude-code',
+      status: 'skipped',
+      detail: '~/.claude.json 无法解析，未改动（请自行修复或备份后删除该文件）',
+    };
+  }
+
   const cli = which('claude');
   if (cli) {
     if (options.dryRun) {
@@ -126,11 +137,13 @@ function applyClaudeCode(ctx, options) {
     // fall through to config editing when the CLI refuses
   }
 
-  const file = path.join(home(), '.claude.json');
-  // A fresh machine has no ~/.claude.json yet; create it instead of skipping.
-  const json = readJson(file) || {};
-  if (json.mcpServers !== undefined && typeof json.mcpServers !== 'object') {
-    return { target: 'claude-code', status: 'skipped', detail: '~/.claude.json 结构异常，未改动' };
+  // Missing file: a fresh machine, so create it.
+  let json = {};
+  if (fs.existsSync(file)) {
+    json = readJson(file) || {};
+  }
+  if (json.mcpServers !== undefined && (json.mcpServers === null || typeof json.mcpServers !== 'object')) {
+    return { target: 'claude-code', status: 'skipped', detail: '~/.claude.json 的 mcpServers 结构异常，未改动' };
   }
   json.mcpServers = json.mcpServers || {};
   json.mcpServers[SERVER_NAME] = mcpEntry(ctx);

@@ -139,6 +139,7 @@ async function commandInstall(args) {
   if (!dryRun) {
     const ok = await verifyEntry(ctx.mcpPath);
     results.push({ what: 'verify', status: ok ? 'ok' : 'FAILED', file: ok ? ctx.mcpPath : `${ctx.mcpPath}（没有响应 MCP 握手）` });
+    if (!ok) process.exitCode = 1;
   }
   results.push({ what: 'shim', ...agents.installShim(launch, ctx.dshHome, { dryRun }) });
   for (const item of agents.installSkill(ctx.dshHome, { dryRun })) results.push({ what: 'skill', ...item });

@@ -174,6 +174,11 @@ function discover() {
   const explicitApp = process.env.DSH_DELEGATE_APP;
   const explicitBootstrap = process.env.DSH_DELEGATE_BOOTSTRAP;
   if (explicitApp) {
+    if (!exists(explicitApp)) {
+      const error = new Error(`DSH_DELEGATE_APP 指向的文件不存在：${explicitApp}`);
+      error.code = 'DSH_NOT_FOUND';
+      throw error;
+    }
     return {
       kind: 'desktop',
       command: explicitApp,

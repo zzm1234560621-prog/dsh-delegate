@@ -36,7 +36,9 @@
     "status": "node bin/dsh-delegate.js status",
     "doctor": "node bin/dsh-delegate.js doctor",
     "test": "node test/smoke.js",
-    "test:live": "node test/smoke.js --run"
+    "test:edge": "node test/edge.js",
+    "test:live": "node test/live.js",
+    "test:all": "node test/smoke.js && node test/edge.js"
   },
   "keywords": [
     "mcp",
