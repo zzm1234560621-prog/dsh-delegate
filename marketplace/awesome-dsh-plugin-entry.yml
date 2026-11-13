@@ -1,0 +1,17 @@
+# 提交到 awesome-dsh-plugin 的条目文件（草稿）
+#
+# 用法：仓库转 public 后，把本文件复制到 awesome-dsh-plugin 仓库的
+#   data/plugins/zzm1234560621-prog__dsh-delegate--plugin.yml
+# 然后开 PR。文件名规则：monorepo 子包用 <owner>__<repo>--<subdir>.yml
+#
+# 注意：
+#   - 不带 icon 时回退到作者头像；要带图标必须是 GitHub 托管的位图（PNG/JPG），
+#     我们目前只有 SVG，所以这里省略。
+#   - 描述里如有「冒号+空格」必须加引号。
+
+url: https://github.com/zzm1234560621-prog/dsh-delegate/tree/main/plugin
+name: zzm1234560621-prog/dsh-delegate#plugin
+category: tools
+description:
+  en: Wires Claude Desktop, Claude Code and Codex to a local DeepSeek Harness over MCP, and adds a status panel to the DSH web UI.
+  zh: 把 Claude 桌面版 / Claude Code / Codex 通过 MCP 接到本机 DeepSeek Harness，并在 DSH 页面内提供运行状态面板。
