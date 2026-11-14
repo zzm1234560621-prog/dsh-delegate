@@ -30,6 +30,8 @@ const DEFAULT_SETTINGS = {
   daemonPort: 7788,
   daemonUi: true,
   daemonAutostart: false,
+  quotaHighPct: 70, // a client's plan usage at/over this: delegate more
+  quotaCriticalPct: 90, // at/over this: delegate everything delegable
 };
 
 function settingsFile() {
@@ -354,6 +356,9 @@ function sanitizeSettings(input) {
   if (Number.isFinite(input.daemonPort)) out.daemonPort = Math.min(Math.max(Math.floor(input.daemonPort), 1024), 65535);
   if (typeof input.daemonUi === 'boolean') out.daemonUi = input.daemonUi;
   if (typeof input.daemonAutostart === 'boolean') out.daemonAutostart = input.daemonAutostart;
+  for (const key of ['quotaHighPct', 'quotaCriticalPct']) {
+    if (Number.isFinite(input[key])) out[key] = Math.min(Math.max(Math.round(input[key]), 1), 100);
+  }
   return out;
 }
 

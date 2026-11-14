@@ -305,6 +305,14 @@ async function httpSuite() {
   check('非 JSON 请求体 → 415', plain.status === 415, `${plain.status}`);
   const ok = await request(base, 'POST', '/api/settings', { origin: base, 'content-type': 'application/json' }, '{"softWaitMs":1234}');
   check('看板自己的 JSON POST 正常', ok.status === 200 && /1234/.test(fs.readFileSync(settingsFile, 'utf8')), `${ok.status}`);
+  const quotaReply = await request(base, 'GET', '/api/quota');
+  let quotaBody = {};
+  try {
+    quotaBody = JSON.parse(quotaReply.body);
+  } catch {
+    quotaBody = {};
+  }
+  check('/api/quota 返回 Claude / Codex 额度和阈值', quotaReply.status === 200 && 'claude' in quotaBody && 'codex' in quotaBody && quotaBody.thresholds, `${quotaReply.status}`);
   const smuggle = await request(base, 'POST', '/api/env', { 'content-type': 'application/json' }, JSON.stringify({ name: 'FOO', value: 'x\nDSH_EVIL=1' }));
   const envText = fs.existsSync(path.join(sb.home, '.env')) ? fs.readFileSync(path.join(sb.home, '.env'), 'utf8') : '';
   check('.env 值里的换行被拒绝', smuggle.status === 400 && !/DSH_EVIL/.test(envText), `${smuggle.status}`);
@@ -425,6 +433,111 @@ console.log('\n== 发布包：换行符由 .gitattributes 固定 ==');
   }
 }
 
+// ---------------------------------------------------------------- quota-aware delegation
+
+function mcpInstructions(sb, clientName) {
+  return new Promise((resolve) => {
+    const child = spawn(NODE, [path.join(ROOT, 'lib', 'mcp.js')], { env: envFor(sb, FAKE_DESKTOP) });
+    let buffer = '';
+    const finish = (text) => {
+      child.kill();
+      resolve(text);
+    };
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk;
+      const line = buffer.split('\n').find((item) => item.includes('"instructions"'));
+      if (line) finish(JSON.parse(line).result.instructions);
+    });
+    setTimeout(() => finish(''), 10_000);
+    child.stdin.write(
+      `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: clientName, version: '1' } } })}\n`,
+    );
+  });
+}
+
+async function quotaSuite() {
+  console.log('\n== 额度快用完时多派给 DSH ==');
+  const sb = sandbox('quota');
+  const run = (args, input, extra) =>
+    spawnSync(NODE, [CLI, ...args], { env: envFor(sb, extra), encoding: 'utf8', input, timeout: 60_000 });
+  const later = Math.floor(Date.now() / 1000) + 3600;
+  const statusInput = (fiveHour) =>
+    JSON.stringify({
+      model: { display_name: 'Opus' },
+      context_window: { used_percentage: 12 },
+      rate_limits: {
+        five_hour: { used_percentage: fiveHour, resets_at: later },
+        seven_day: { used_percentage: 30, resets_at: later + 86_400 },
+      },
+    });
+  const contextOf = (result) => {
+    try {
+      return JSON.parse(result.stdout).hookSpecificOutput.additionalContext;
+    } catch {
+      return '';
+    }
+  };
+
+  const low = run(['statusline'], statusInput(20));
+  check('statusline 输出一行底栏（模型、上下文、额度）', low.status === 0 && /\[Opus\]/.test(low.stdout) && /5h 20%/.test(low.stdout), low.stdout.trim());
+  check('statusline 把额度记到 $DSH_HOME/quota/claude.json', fs.existsSync(path.join(sb.home, 'quota', 'claude.json')));
+  const quiet = run(['hook', 'prompt'], '{}');
+  check('额度不高时 hook 什么都不加', quiet.status === 0 && quiet.stdout.trim() === '', quiet.stdout.trim());
+
+  const high = run(['statusline'], statusInput(82));
+  check('用到 82%：底栏显示「DSH 多派」', /DSH 多派/.test(high.stdout), high.stdout.trim());
+  const nudge = contextOf(run(['hook', 'prompt'], '{}'));
+  check('用到 82%：hook 要求优先派给 DSH', /82%/.test(nudge) && /dsh_task/.test(nudge), nudge.slice(0, 80));
+
+  run(['statusline'], statusInput(95));
+  const urgent = contextOf(run(['hook', 'prompt'], '{}'));
+  check('用到 95%：提醒升级为「全派」', /全部派给 DSH/.test(urgent), urgent.slice(0, 80));
+
+  check('statusline 收到坏输入照常输出', /DSH/.test(run(['statusline'], 'not json').stdout));
+  check('hook 收到坏输入照常退出', run(['hook', 'prompt'], 'not json').status === 0);
+  const listing = run(['quota'], '');
+  check('quota 命令列出 Claude 和 Codex', listing.status === 0 && /Claude/.test(listing.stdout) && /Codex/.test(listing.stdout), listing.stdout.trim());
+
+  // Codex sessions start with Codex's own quota; Claude clients with Claude's.
+  const day = path.join(sb.user, '.codex', 'sessions', '2026', '11', '14');
+  fs.mkdirSync(day, { recursive: true });
+  fs.writeFileSync(
+    path.join(day, 'rollout-test.jsonl'),
+    `${JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', rate_limits: { primary: { used_percent: 93, window_minutes: 300, resets_at: later }, secondary: { used_percent: 20, window_minutes: 10080, resets_at: later + 86_400 } } } })}\n`,
+  );
+  const codexNote = await mcpInstructions(sb, 'codex-mcp-client');
+  check('Codex 会话开始时说明里带 Codex 的额度', /Codex/.test(codexNote) && /93%/.test(codexNote), codexNote.slice(-120));
+  const claudeNote = await mcpInstructions(sb, 'claude-code');
+  check('Claude 会话开始时说明里带 Claude 的额度', /Claude/.test(claudeNote) && /95%/.test(claudeNote), claudeNote.slice(-120));
+
+  // install --usage-hooks edits Claude Code's settings.json carefully.
+  const settings = path.join(sb.user, 'settings.json'); // CLAUDE_CONFIG_DIR is the sandbox home
+  run(['install', '--no-clients', '--usage-hooks'], '', FAKE_DESKTOP);
+  const wired = JSON.parse(fs.readFileSync(settings, 'utf8'));
+  const ourHook = wired.hooks && wired.hooks.UserPromptSubmit && wired.hooks.UserPromptSubmit[0].hooks[0];
+  check('--usage-hooks 写入 statusLine 和 UserPromptSubmit hook', /statusline$/.test(wired.statusLine.command) && /hook prompt$/.test(ourHook.command));
+  check('命令里只用正斜杠（Git Bash / PowerShell 都能解析）', !wired.statusLine.command.includes('\\') && !ourHook.command.includes('\\'));
+  const again = run(['install', '--no-clients', '--usage-hooks'], '', FAKE_DESKTOP);
+  check(
+    '再装一次全是 unchanged，不重复添加',
+    /claude-statusline\s+unchanged/.test(again.stdout) && /claude-prompt-hook\s+unchanged/.test(again.stdout) &&
+      JSON.parse(fs.readFileSync(settings, 'utf8')).hooks.UserPromptSubmit.length === 1,
+    again.stdout.split('\n').filter((line) => /claude-/.test(line)).join(' | '),
+  );
+
+  fs.writeFileSync(settings, JSON.stringify({ theme: 'dark', statusLine: { type: 'command', command: 'bash ~/mine.sh' }, hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'echo mine' }] }] } }));
+  run(['install', '--no-clients', '--usage-hooks'], '', FAKE_DESKTOP);
+  const merged = JSON.parse(fs.readFileSync(settings, 'utf8'));
+  check('用户自己的 statusLine 不动', merged.statusLine.command === 'bash ~/mine.sh');
+  check('用户自己的 hook 和其它设置保留，另加我们的', merged.theme === 'dark' && merged.hooks.UserPromptSubmit.length === 2);
+  run(['uninstall'], '', FAKE_DESKTOP);
+  const left = JSON.parse(fs.readFileSync(settings, 'utf8'));
+  check(
+    '卸载只删我们加的 hook，别的都留着',
+    left.statusLine.command === 'bash ~/mine.sh' && left.hooks.UserPromptSubmit.length === 1 && left.hooks.UserPromptSubmit[0].hooks[0].command === 'echo mine',
+  );
+}
+
 // ---------------------------------------------------------------- bundle
 
 console.log('\n== 插件包里的服务与 lib/ 同步 ==');
@@ -441,6 +554,7 @@ console.log('\n== 插件包里的服务与 lib/ 同步 ==');
 (async () => {
   await httpSuite();
   await mcpSuite();
+  await quotaSuite();
   for (const dir of sandboxes) {
     try {
       fs.rmSync(dir, { recursive: true, force: true });

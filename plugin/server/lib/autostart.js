@@ -45,6 +45,11 @@ function windowsRunKey() {
   return 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
 }
 
+/**
+ * `ours`: the entry starts this install's launcher. HKCU\...\Run is one per user, so
+ * a copy running with another APPDATA (a test sandbox, a second install) must never
+ * switch off the real entry.
+ */
 function status() {
   if (process.platform === 'win32') {
     const vbs = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'dsh-delegate', 'daemon.vbs');
@@ -53,17 +58,20 @@ function status() {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'ignore'],
       });
-      return { enabled: /dsh-delegate/.test(out), mechanism: 'HKCU Run', target: vbs };
+      const enabled = /dsh-delegate/.test(out);
+      return { enabled, ours: enabled && out.toLowerCase().includes(vbs.toLowerCase()), mechanism: 'HKCU Run', target: vbs };
     } catch {
-      return { enabled: false, mechanism: 'HKCU Run', target: vbs };
+      return { enabled: false, ours: false, mechanism: 'HKCU Run', target: vbs };
     }
   }
   if (process.platform === 'darwin') {
     const plist = path.join(os.homedir(), 'Library', 'LaunchAgents', 'dev.dsh-delegate.daemon.plist');
-    return { enabled: fs.existsSync(plist), mechanism: 'LaunchAgent', target: plist };
+    const enabled = fs.existsSync(plist);
+    return { enabled, ours: enabled, mechanism: 'LaunchAgent', target: plist };
   }
   const desktop = path.join(os.homedir(), '.config', 'autostart', 'dsh-delegate.desktop');
-  return { enabled: fs.existsSync(desktop), mechanism: 'XDG autostart', target: desktop };
+  const enabled = fs.existsSync(desktop);
+  return { enabled, ours: enabled, mechanism: 'XDG autostart', target: desktop };
 }
 
 function enable(options = {}) {
@@ -142,10 +150,12 @@ X-GNOME-Autostart-enabled=true
 function disable() {
   const current = status();
   if (process.platform === 'win32') {
-    try {
-      execFileSync('reg', ['delete', windowsRunKey(), '/v', NAME, '/f']);
-    } catch {
-      /* already gone */
+    if (current.ours) {
+      try {
+        execFileSync('reg', ['delete', windowsRunKey(), '/v', NAME, '/f']);
+      } catch {
+        /* already gone */
+      }
     }
     try {
       fs.rmSync(current.target, { force: true });

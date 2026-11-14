@@ -596,6 +596,22 @@ async function callJob(args, ctx) {
   return awaitJob(job, input.wait_ms, ctx);
 }
 
+/**
+ * The connecting client's plan quota, when it is running low, so the session starts
+ * out delegating more. Codex: its own session logs. Claude clients: what Claude Code
+ * last recorded (Claude Desktop shares that plan quota). Read once per session.
+ */
+function quotaNote(clientInfo) {
+  try {
+    const quota = require('./quota');
+    const codex = String((clientInfo && clientInfo.name) || '').toLowerCase().includes('codex');
+    const text = quota.advice(codex ? quota.readCodex() : quota.readClaude(), codex ? 'Codex' : 'Claude');
+    return text ? `\n\n${text}` : '';
+  } catch {
+    return '';
+  }
+}
+
 // ---------------------------------------------------------------- protocol
 
 function sendNotification(method, params) {
@@ -626,7 +642,8 @@ function handle(message) {
         capabilities: { tools: { listChanged: false } },
         serverInfo: SERVER_INFO,
         instructions:
-          '把边界清楚的任务委派给本机 DeepSeek Harness 子代理：dsh_task 单发、dsh_parallel 并行、dsh_job 追长任务。',
+          '把边界清楚的任务委派给本机 DeepSeek Harness 子代理：dsh_task 单发、dsh_parallel 并行、dsh_job 追长任务。' +
+          quotaNote(params && params.clientInfo),
       });
       return;
     }

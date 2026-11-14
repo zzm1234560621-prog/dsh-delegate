@@ -377,4 +377,6 @@ module.exports = {
   removeAll,
   sameEntry,
   codexBlock,
+  backup,
+  readJson,
 };

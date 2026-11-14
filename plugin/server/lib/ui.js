@@ -177,6 +177,10 @@ async function handleApi(req, res, pathname) {
     return json(res, 200, { run: meta, events: runlog.readEvents(id, 200) });
   }
 
+  if (pathname === '/api/quota' && req.method === 'GET') {
+    return json(res, 200, require('./quota').summary());
+  }
+
   if (pathname === '/api/settings' && req.method === 'GET') {
     return json(res, 200, { ok: true, settings: config.readSettings(), file: config.state().settingsFile });
   }
@@ -366,7 +370,7 @@ function start(options = {}) {
           name: 'dsh-delegate',
           mode: 'api-only',
           ui: false,
-          endpoints: ['/api/state', '/api/model', '/api/settings', '/api/env', '/api/runs', '/api/test', '/api/clients/install'],
+          endpoints: ['/api/state', '/api/model', '/api/settings', '/api/env', '/api/runs', '/api/quota', '/api/test', '/api/clients/install'],
           hint: '这是仅 API 模式；用 dsh-delegate daemon（不带 --no-ui）启动看板。',
         });
         return;
