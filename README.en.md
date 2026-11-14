@@ -73,6 +73,7 @@ Both scripts take the same flags (on Windows, `-DryRun` / `-Targets` work too):
 | `--targets=claude-code,codex` | Wire only these clients (default: all three) |
 | `--copy-credentials` | Copy the `DEEPSEEK_API_KEY` saved in DSH into the `.env` headless reads |
 | `--autostart` | Start the local dashboard service at login |
+| `--usage-hooks` | Add quota recording and delegation reminders to Claude Code (edits `~/.claude/settings.json`) |
 
 A misspelled flag aborts instead of installing.
 
@@ -95,6 +96,7 @@ Restart that profile. From then on, every DSH start checks the three clients' MC
 | `~/.dsh/skills/dsh-delegate/`, `~/.claude/skills/dsh-delegate/` | Skill: what is worth delegating and how to write the task |
 | `~/.dsh/AGENTS.md`, `~/.claude/CLAUDE.md` | Appends one marked block (`<!-- dsh-delegate:start -->` … `end`); reinstalls replace only that block |
 | Claude Desktop config, `~/.claude.json`, `~/.codex/config.toml` | Adds an MCP server named `dsh` |
+| `~/.claude/settings.json` (only with `--usage-hooks`) | statusLine and UserPromptSubmit hook |
 
 Files are written only when their content actually changes, and a `*.bak-dsh-delegate-<time>` backup is kept next to each one first.
 
@@ -162,6 +164,24 @@ Edited 14 files; eslint passes.
 - Subagents can read the whole repo but write only their working directory or `write_scope`. The defaults are the `workspace-write` sandbox and unattended runs (`--approval-policy never`).
 - `dsh_job` with `cancel` stops only that job's subagents and the processes they started; other jobs keep running.
 
+## Delegate more when quota runs low
+
+When the Claude Code or Codex plan quota runs low, dsh-delegate reminds them to hand more work to DSH.
+
+| Client | Where the quota comes from | How the reminder arrives |
+|---|---|---|
+| Claude Code | Used percentages for the 5-hour and weekly windows in the data Claude Code passes to the statusline (claude.ai Pro / Max / Ultra plans only); `dsh-delegate statusline` records them to `$DSH_HOME/quota/claude.json` and shows the quota and current tier in the Claude Code footer | A UserPromptSubmit hook (`dsh-delegate hook prompt`) adds the reminder to Claude's context on every message |
+| Codex | Read directly from its local session log `~/.codex/sessions`; no setup needed | At the start of every new session, the MCP server puts the current quota and delegation requirement into the instructions it gives Codex |
+| Claude Desktop | Shares the plan quota with Claude Code and uses the last figures Claude Code recorded, which may be out of date | At MCP server startup, puts the quota and delegation requirement into the instructions it gives Claude |
+
+No login tokens are read.
+
+Tiers: when either window reaches 70% (default), "delegate more": work that can be written as a self-contained instruction goes to DSH first; at 90% (default), "delegate everything": everything except the decisions the model has to make itself goes to DSH. Both thresholds are changed in the dashboard card 额度与派活档位 (quota and delegation tier). Below the thresholds, nothing is added.
+
+Turning it on: install with `--usage-hooks`. It adds a statusLine and this hook to `~/.claude/settings.json`, with a backup first. If you already have your own statusLine, it's left alone and only the hook is added (in that case nothing records Claude's quota; you can forward the input to `dsh-delegate statusline` from your own statusline script). To see the current quota: `dsh-delegate quota`. Uninstall removes the statusLine and hook it added.
+
+Limits: it's only an explicit reminder; whether to delegate is still up to the model. Codex's log format isn't a public interface, so when it can't be read, nothing happens. The Code tab of the Claude desktop app may not run the statusline, so only Claude Code in the terminal updates the numbers then.
+
 ## Dashboard and local service
 
 Below, `dsh-delegate` means `node ~/.dsh/bridge/bin/dsh-delegate.js` (on Windows `node "$env:USERPROFILE\.dsh\bridge\bin\dsh-delegate.js"`).
@@ -171,6 +191,7 @@ dsh-delegate ui --open         # start the service and open the dashboard: http:
 dsh-delegate daemon --no-ui    # API only, no dashboard
 dsh-delegate autostart on      # start at login
 dsh-delegate status
+dsh-delegate quota             # show Claude / Codex quota and current tier
 ```
 
 The service listens on `127.0.0.1` only and accepts requests only from local processes, local pages (the dashboard itself, `dsh web`) and the DSH desktop app. Requests that other websites send from your browser get a 403. If you really need another origin, add it with the `DSH_DELEGATE_ALLOWED_ORIGINS` environment variable.
@@ -193,7 +214,7 @@ dsh-delegate uninstall --remove-runtime
 dsh plugin --profile <profile> remove dsh-delegate    # if you installed the plugin
 ```
 
-Uninstall removes the skill, the instruction block, the launcher it created, and every client's `dsh` entry that points at this tool, and turns off autostart. Someone else's entry with the same name is left alone. Add `--keep-clients` to keep the client configs.
+Uninstall removes the skill, the instruction block, the launcher it created, the statusLine and hook it added to Claude Code, and every client's `dsh` entry that points at this tool, and turns off autostart. Someone else's entry with the same name is left alone. Add `--keep-clients` to keep the client configs.
 
 ## Known limits
 
