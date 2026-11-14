@@ -61,16 +61,32 @@ function copyRuntime(dest) {
   const stage = `${dest}.staging-${process.pid}`;
   fs.rmSync(stage, { recursive: true, force: true });
   fs.mkdirSync(stage, { recursive: true });
-  try {
-    for (const entry of ['lib', 'assets', 'bin']) {
-      fs.cpSync(path.join(ROOT, entry), path.join(stage, entry), { recursive: true });
-    }
-    fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(stage, 'package.json'));
 
+  const put = (root) => {
+    for (const entry of ['lib', 'assets', 'bin']) {
+      fs.cpSync(path.join(ROOT, entry), path.join(root, entry), { recursive: true });
+    }
+    fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(root, 'package.json'));
+  };
+
+  try {
+    put(stage);
+
+    // Swap in the new tree. While the service runs from dest, Windows refuses the
+    // rename (EBUSY/EACCES/EPERM) because the directory holds open handles; fall
+    // back to overwriting in place, which works since Node already read the JS.
     const backup = `${dest}.old-${process.pid}`;
-    if (fs.existsSync(dest)) fs.renameSync(dest, backup);
-    fs.renameSync(stage, dest);
-    fs.rmSync(backup, { recursive: true, force: true });
+    try {
+      if (fs.existsSync(dest)) fs.renameSync(dest, backup);
+      fs.renameSync(stage, dest);
+      fs.rmSync(backup, { recursive: true, force: true });
+      return { mode: 'atomic' };
+    } catch (cause) {
+      if (!['EBUSY', 'EACCES', 'EPERM', 'ENOTEMPTY'].includes(cause.code)) throw cause;
+      put(dest);
+      fs.rmSync(stage, { recursive: true, force: true });
+      return { mode: 'in-place' };
+    }
   } catch (cause) {
     fs.rmSync(stage, { recursive: true, force: true });
     throw cause;
