@@ -192,14 +192,11 @@ async function commandInstall(args) {
     const hasKey = fs.existsSync(envFile) && /^[A-Z_]+=.+/m.test(fs.readFileSync(envFile, 'utf8'));
     if (!hasKey && !process.env.DEEPSEEK_API_KEY) {
       log('');
-      log('⚠ 没检测到凭据：headless 只读 $DSH_HOME/.env 或启动环境，不读 GUI 保存的 key。');
-      log('  第一次派活会报 MISSING_CREDENTIAL。补一个即可：');
-      log(
-        process.platform === 'win32'
-          ? `    "DEEPSEEK_API_KEY=sk-..." | Add-Content "${envFile}"`
-          : `    echo 'DEEPSEEK_API_KEY=sk-...' >> "${envFile}"`,
-      );
-      log('  或重跑本命令时加 --copy-credentials（从 DSH 已有凭据里搬）。');
+      log('⚠ 没检测到凭据：headless 不读 DSH 桌面版里保存的 key，要单独配一次。');
+      log('  不配的话，第一次派活会报 MISSING_CREDENTIAL。在看板里配：');
+      log(`    node "${path.join(bridgeDir(), 'bin', 'dsh-delegate.js')}" ui --open`);
+      log('    →「执行模型与凭据」：选供应商和模型，填 key，写入 .env，保存模型');
+      log('  只用 DeepSeek 的话，也可以重跑本命令加 --copy-credentials，从 DSH 里搬现成的 key。');
     }
   }
 
@@ -275,7 +272,7 @@ function commandDoctor(args) {
   checks.push({
     name: '.env credentials',
     ok: fs.existsSync(path.join(home, '.env')),
-    detail: fs.existsSync(path.join(home, '.env')) ? 'present' : '缺少；用 install --copy-credentials 或写 DEEPSEEK_API_KEY',
+    detail: fs.existsSync(path.join(home, '.env')) ? 'present' : '缺少；在看板「执行模型与凭据」里配（dsh-delegate ui --open）',
   });
 
   const desktop = targets.claudeDesktopConfigs();

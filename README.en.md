@@ -28,13 +28,26 @@ Claude Desktop / Claude Code / Codex
 
 - Node.js ≥ 18
 - DSH, either the desktop app (DSH NEXT) or the CLI (`npm i -g @deepseek-ai/dsh`)
-- A model credential that headless DSH can read (see [Credentials](#credentials))
+- A model API key, set in the dashboard after install (see [Model and key setup](#model-and-key-setup))
 
 ## Install
 
-### A. One-shot script: if you mainly use Claude / Codex
+Both ways do the same job: connect Claude Desktop, Claude Code and Codex to your local DSH. DSH's own subagents use its built-in subagent tools and don't go through this project.
 
-Windows (PowerShell or cmd):
+| | A. Install script | B. DSH plugin |
+|---|---|---|
+| Wire the three clients to DSH (MCP config) | ✓ once, at install | ✓ checked on every DSH start, written only if different |
+| Skill and global delegation rules (teach Claude what to delegate) | ✓ | — |
+| `dsh` command-line launcher | ✓ | — |
+| Delegation panel above the DSH composer | — | ✓ |
+
+Installing both is recommended: the script sets everything up, and the plugin keeps the configs in line afterwards and adds the panel. The plugin prefers the runtime the script deployed.
+
+### A. Install script
+
+**Download, no git needed**: get `dsh-delegate-v*.zip` from [Releases](https://github.com/zzm1234560621-prog/dsh-delegate/releases/latest) and unzip it. On Windows, double-click `install.cmd` (the window stays open on the result); on macOS / Linux, run `sh install.sh` in the unzipped folder.
+
+**Or clone with git**, Windows (PowerShell or cmd):
 
 ```powershell
 git clone https://github.com/zzm1234560621-prog/dsh-delegate
@@ -63,20 +76,15 @@ Both scripts take the same flags (on Windows, `-DryRun` / `-Targets` work too):
 
 A misspelled flag aborts instead of installing.
 
-Then **fully quit and reopen Claude Desktop**, or start a new Claude Code session. Once `dsh_task` / `dsh_parallel` / `dsh_job` show up in the tool list, you're set. After a `git pull`, run the script again; configs that haven't changed are left untouched.
+Then **fully quit and reopen Claude Desktop**, or start a new Claude Code session. Once `dsh_task` / `dsh_parallel` / `dsh_job` show up in the tool list, you're set. If you haven't set a key yet, continue with [Model and key setup](#model-and-key-setup). To update, download the new zip (or `git pull`) and run the script again; configs that haven't changed are left untouched.
 
-### B. DSH plugin: if you mainly use DSH
+### B. DSH plugin
 
 ```bash
 dsh plugin --profile <profile> add "file:/path/to/dsh-delegate/plugin"
 ```
 
-Restart that profile. The plugin also wires Claude / Codex (writing only when a config differs, with a backup first) and adds a delegation panel above the DSH composer. Set `wireClients: false` in the plugin config to keep it away from external clients.
-
-| You mainly use | Install |
-|---|---|
-| Claude Desktop / Claude Code / Codex | A |
-| DSH | B (wires Claude as well) |
+Restart that profile. From then on, every DSH start checks the three clients' MCP configs and writes only when one differs, with a backup first. `node` must be on PATH. The delegation panel shows the local service's status and the tasks Claude / Codex delegated; DSH's own subagents don't appear there. Set `wireClients: false` in the plugin config to keep it away from external clients.
 
 ### What the installer touches
 
@@ -98,21 +106,27 @@ Cursor, Windsurf and any other stdio MCP client can be added by hand. This print
 node ~/.dsh/bridge/bin/dsh-delegate.js print-config
 ```
 
-## Credentials
+## Model and key setup
 
-Headless DSH reads only the launch environment, `<cwd>/.env` and `$DSH_HOME/.env` (default `~/.dsh/.env`). **It does not read keys saved in the DSH desktop app.**
+Headless DSH can't read the keys saved in the DSH desktop app, so after installing, **set the model and key once in the dashboard**.
 
-```powershell
-# Windows
-"DEEPSEEK_API_KEY=sk-..." | Add-Content "$env:USERPROFILE\.dsh\.env"
-```
+1. Open the dashboard, or click 打开看板 (open dashboard) on the DSH delegation panel.
 
-```bash
-# macOS / Linux
-echo 'DEEPSEEK_API_KEY=sk-...' >> ~/.dsh/.env
-```
+   ```powershell
+   node "$env:USERPROFILE\.dsh\bridge\bin\dsh-delegate.js" ui --open    # Windows
+   ```
 
-Or install with `--copy-credentials`. To use another model provider, pick it and enter its key in the dashboard. Variable names starting with `DSH_` are reserved by DSH and can't go in `.env`.
+   ```bash
+   node ~/.dsh/bridge/bin/dsh-delegate.js ui --open                    # macOS / Linux
+   ```
+
+2. In 执行模型与凭据 (model and credentials), pick the provider, the model and the reasoning effort.
+3. Click 用当前供应商的变量名 (use this provider's variable name), paste the key into 值 (value) and click 写入 .env (write to .env).
+4. Click 保存模型 (save model). The next delegated task picks it up.
+
+The dashboard writes the key to `$DSH_HOME/.env` (default `~/.dsh/.env`) and the model to the headless profile. Switch providers here too: editing `.env` alone doesn't change the model. Variable names starting with `DSH_` are reserved by DSH and get rejected.
+
+If you only use DeepSeek, installing with `--copy-credentials` also works: it copies the `DEEPSEEK_API_KEY` saved in DSH into `.env`.
 
 ## Usage
 
@@ -159,7 +173,9 @@ dsh-delegate autostart on      # start at login
 dsh-delegate status
 ```
 
-The service listens on `127.0.0.1` only and accepts requests only from local processes and local pages (the dashboard itself, the DSH web UI). Requests that other websites send from your browser get a 403. If you really need another origin, add it with the `DSH_DELEGATE_ALLOWED_ORIGINS` environment variable.
+The service listens on `127.0.0.1` only and accepts requests only from local processes, local pages (the dashboard itself, `dsh web`) and the DSH desktop app. Requests that other websites send from your browser get a 403. If you really need another origin, add it with the `DSH_DELEGATE_ALLOWED_ORIGINS` environment variable.
+
+The service doesn't start with Claude or DSH. To keep it running, turn on autostart at login: `dsh-delegate autostart on`.
 
 ## Checks and tests
 
@@ -190,7 +206,9 @@ Uninstall removes the skill, the instruction block, the launcher it created, and
 
 **No `dsh_*` tools in the list**: fully quit Claude Desktop (including the tray icon) and reopen it, or start a new Claude Code session. If they're still missing, run `dsh-delegate doctor`.
 
-**`MISSING_CREDENTIAL`**: headless DSH can't find a key; see [Credentials](#credentials).
+**`MISSING_CREDENTIAL`**: headless DSH can't find a key; set one in the dashboard, see [Model and key setup](#model-and-key-setup).
+
+**The DSH delegation panel says 服务未连接 (service not connected)**: the local service isn't running. Start it with `dsh-delegate ui --open`, or turn on autostart.
 
 **`job=dsh-…`**: the task is still running; keep waiting with `dsh_job`.
 

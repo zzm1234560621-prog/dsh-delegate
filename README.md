@@ -28,13 +28,26 @@ Claude Desktop / Claude Code / Codex
 
 - Node.js ≥ 18
 - DSH 桌面版（DSH NEXT）或 CLI（`npm i -g @deepseek-ai/dsh`），装一个即可
-- 一个 headless 能读到的模型凭据，见下文「凭据」
+- 一个模型 API key，装好后在看板里配，见「配置模型和 key」
 
 ## 安装
 
-### A. 一键脚本：主要用 Claude / Codex
+两种装法的目的一样：把 Claude 桌面版、Claude Code、Codex 接到本机 DSH。DSH 自己派子代理用的是它内置的 subagent，不经过本工具。
 
-Windows（PowerShell 或 cmd）：
+| | A. 安装脚本 | B. DSH 插件 |
+|---|---|---|
+| 把三个客户端接到 DSH（MCP 配置） | ✓ 安装时写一次 | ✓ 每次 DSH 启动时检查，不一致才写 |
+| skill 和全局分工说明（教 Claude 哪些活该派） | ✓ | — |
+| `dsh` 命令行启动器 | ✓ | — |
+| DSH 输入框上方的委派面板 | — | ✓ |
+
+推荐两个都装：脚本把全套装好，插件负责以后自动校准配置、提供面板。插件会优先使用脚本部署的运行时。
+
+### A. 安装脚本
+
+**下载安装包，不需要 git**：到 [Releases](https://github.com/zzm1234560621-prog/dsh-delegate/releases/latest) 下载 `dsh-delegate-v*.zip` 并解压。Windows 双击 `install.cmd`，窗口会停在结果页；macOS / Linux 在解压出的目录里运行 `sh install.sh`。
+
+**或者用 git 克隆**，Windows（PowerShell 或 cmd）：
 
 ```powershell
 git clone https://github.com/zzm1234560621-prog/dsh-delegate
@@ -63,20 +76,15 @@ cd dsh-delegate
 
 拼错的参数会直接报错退出，不会误装。
 
-装完后**完全退出并重开 Claude 桌面版**，或新开一个 Claude Code 会话。工具列表里出现 `dsh_task` / `dsh_parallel` / `dsh_job` 就说明装好了。以后 `git pull` 了新版本，重跑一次安装脚本即可：没有变化的配置不会被重写。
+装完后**完全退出并重开 Claude 桌面版**，或新开一个 Claude Code 会话。工具列表里出现 `dsh_task` / `dsh_parallel` / `dsh_job` 就说明装好了。还没配过 key 的话，接着按下面「配置模型和 key」在看板里配一次。以后更新时，下载新的安装包（或 `git pull`）再跑一次安装脚本即可：没有变化的配置不会被重写。
 
-### B. DSH 插件：主要用 DSH
+### B. DSH 插件
 
 ```bash
 dsh plugin --profile <profile> add "file:/path/to/dsh-delegate/plugin"
 ```
 
-装完重启该 profile。插件会顺手把 Claude / Codex 接上（只在配置不一致时写，写前备份），并在 DSH 输入框上方加一个委派面板。不想让插件改外部客户端，就在插件配置里设 `wireClients: false`。
-
-| 你主要用 | 装哪个 |
-|---|---|
-| Claude 桌面版 / Claude Code / Codex | A |
-| DSH | B（顺带接上 Claude） |
+装完重启该 profile。之后 DSH 每次启动都会检查三个客户端的 MCP 配置，只在不一致时才写，写之前备份。需要 PATH 上有 `node`。委派面板显示本机服务的状态，以及 Claude / Codex 派来的任务；DSH 自己的子代理不会出现在这里。不想让插件改外部客户端，就在插件配置里设 `wireClients: false`。
 
 ### 安装器会改哪些文件
 
@@ -98,21 +106,27 @@ Cursor、Windsurf 等支持 stdio MCP 的客户端，可以手动添加。下面
 node ~/.dsh/bridge/bin/dsh-delegate.js print-config
 ```
 
-## 凭据
+## 配置模型和 key
 
-headless 只读启动环境变量、`<cwd>/.env` 和 `$DSH_HOME/.env`（默认 `~/.dsh/.env`），**不读 DSH 桌面版里保存的 key**。
+headless 读不到 DSH 桌面版里保存的 key，装好后要**在看板里配一次**。
 
-```powershell
-# Windows
-"DEEPSEEK_API_KEY=sk-..." | Add-Content "$env:USERPROFILE\.dsh\.env"
-```
+1. 打开看板。也可以点 DSH 委派面板上的「打开看板」。
 
-```bash
-# macOS / Linux
-echo 'DEEPSEEK_API_KEY=sk-...' >> ~/.dsh/.env
-```
+   ```powershell
+   node "$env:USERPROFILE\.dsh\bridge\bin\dsh-delegate.js" ui --open    # Windows
+   ```
 
-也可以在安装时加 `--copy-credentials`。换别的模型供应商、填对应的 key，在看板里点选即可。`DSH_` 开头的变量名是 DSH 保留的，不能写进 `.env`。
+   ```bash
+   node ~/.dsh/bridge/bin/dsh-delegate.js ui --open                    # macOS / Linux
+   ```
+
+2. 在「执行模型与凭据」里选模型供应商、模型和思考强度。
+3. 点「用当前供应商的变量名」，在「值」里粘贴 key，点「写入 .env」。
+4. 点「保存模型」，下次派活就生效。
+
+看板会把 key 写进 `$DSH_HOME/.env`（默认 `~/.dsh/.env`），把模型写进 headless profile。换供应商也要在这里换：只改 `.env` 不会切换模型。`DSH_` 开头的变量名是 DSH 保留的，会被拒绝。
+
+只用 DeepSeek 的话，安装时加 `--copy-credentials` 也行，它会把 DSH 里已存的 `DEEPSEEK_API_KEY` 复制到 `.env`。
 
 ## 使用
 
@@ -157,7 +171,9 @@ dsh-delegate autostart on      # 登录自启动
 dsh-delegate status
 ```
 
-服务只监听 `127.0.0.1`，只接受本机进程和本机页面（看板自己、DSH 的 web 界面）的请求；其他网站从浏览器发来的请求一律返回 403。如果确实需要放行别的来源，可以用环境变量 `DSH_DELEGATE_ALLOWED_ORIGINS` 追加。
+服务只监听 `127.0.0.1`，只接受本机进程、本机页面（看板自己、`dsh web`）和 DSH 桌面版的请求；其他网站从浏览器发来的请求一律返回 403。如果确实需要放行别的来源，可以用环境变量 `DSH_DELEGATE_ALLOWED_ORIGINS` 追加。
+
+服务不随 Claude 或 DSH 启动。要它一直在，就开登录自启：`dsh-delegate autostart on`。
 
 ## 自检与测试
 
@@ -188,7 +204,9 @@ dsh plugin --profile <profile> remove dsh-delegate    # 装过插件的话
 
 **工具列表里没有 `dsh_*`**：完全退出 Claude 桌面版（包括托盘图标）再打开，或新开 Claude Code 会话；还不行就跑 `dsh-delegate doctor`。
 
-**返回 `MISSING_CREDENTIAL`**：headless 读不到 key，见「凭据」。
+**返回 `MISSING_CREDENTIAL`**：headless 读不到 key，到看板「执行模型与凭据」里配，见「配置模型和 key」。
+
+**DSH 里的委派面板显示「服务未连接」**：本机服务没在跑。跑 `dsh-delegate ui --open` 启动它，或者开登录自启。
 
 **返回 `job=dsh-…`**：任务还在跑，用 `dsh_job` 接着等。
 

@@ -8,6 +8,8 @@
 
     Accepts PowerShell-style switches (-DryRun) and the same GNU-style flags as
     install.sh (--dry-run, --targets=...), which are passed through unchanged.
+    Double-clicked (install.cmd from Explorer), it waits for Enter at the end so
+    the result stays readable.
 
 .EXAMPLE
     .\install.ps1 -DryRun
@@ -30,9 +32,30 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Test-LaunchedFromExplorer {
+    # explorer -> install.ps1, or explorer -> install.cmd -> install.ps1
+    try {
+        $self = Get-CimInstance Win32_Process -Filter "ProcessId=$PID"
+        $parent = Get-CimInstance Win32_Process -Filter "ProcessId=$($self.ParentProcessId)"
+        if (-not $parent) { return $false }
+        if ($parent.Name -eq 'explorer.exe') { return $true }
+        if ($parent.Name -ne 'cmd.exe') { return $false }
+        $grand = Get-CimInstance Win32_Process -Filter "ProcessId=$($parent.ParentProcessId)"
+        return [bool]($grand -and $grand.Name -eq 'explorer.exe')
+    } catch {
+        return $false
+    }
+}
+
+function Exit-Installer([int]$Code) {
+    if (Test-LaunchedFromExplorer) { Read-Host 'Done. Press Enter to close this window' | Out-Null }
+    exit $Code
+}
+
 $node = Get-Command node -ErrorAction SilentlyContinue
 if (-not $node) {
-    throw 'dsh-delegate needs Node.js 18 or newer: https://nodejs.org/'
+    Write-Host 'dsh-delegate needs Node.js 18 or newer: https://nodejs.org/' -ForegroundColor Red
+    Exit-Installer 1
 }
 
 $cliArgs = @((Join-Path $PSScriptRoot 'bin/dsh-delegate.js'), 'install')
@@ -43,4 +66,4 @@ if ($Autostart) { $cliArgs += '--autostart' }
 if ($Rest) { $cliArgs += $Rest }
 
 & $node.Source @cliArgs
-exit $LASTEXITCODE
+Exit-Installer $LASTEXITCODE

@@ -1,6 +1,6 @@
 {
   "name": "dsh-delegate",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Let Claude Desktop, Claude Code and Codex delegate self-contained tasks to a local DeepSeek Harness (DSH) subagent over MCP: parallel fan-out with per-task write scopes, async jobs that outlive host timeouts, token stats and a local dashboard. Zero dependencies.",
   "license": "MIT",
   "author": "zzm1234560621-prog",
@@ -41,7 +41,8 @@
     "test:regress": "node test/regress.js",
     "test:live": "node test/live.js",
     "test:all": "node test/smoke.js && node test/edge.js && node test/regress.js",
-    "sync:plugin": "node -e \"const fs=require('fs');for(const f of fs.readdirSync('lib'))fs.copyFileSync('lib/'+f,'plugin/server/lib/'+f)\""
+    "sync:plugin": "node -e \"const fs=require('fs');for(const f of fs.readdirSync('lib'))fs.copyFileSync('lib/'+f,'plugin/server/lib/'+f)\"",
+    "pack": "node scripts/pack-release.js"
   },
   "keywords": [
     "mcp",
