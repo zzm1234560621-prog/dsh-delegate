@@ -73,6 +73,7 @@ cd dsh-delegate
 | `--targets=claude-code,codex` | 只接指定的客户端（默认三个都接） |
 | `--copy-credentials` | 把 DSH 里已存的 `DEEPSEEK_API_KEY` 复制到 headless 能读的 `.env` |
 | `--autostart` | 登录时自动启动本机看板服务 |
+| `--usage-hooks` | 给 Claude Code 加额度记录和派活提醒（会改 `~/.claude/settings.json`） |
 
 拼错的参数会直接报错退出，不会误装。
 
@@ -95,6 +96,7 @@ dsh plugin --profile <profile> add "file:/path/to/dsh-delegate/plugin"
 | `~/.dsh/skills/dsh-delegate/`、`~/.claude/skills/dsh-delegate/` | skill：哪些活值得派、任务怎么写 |
 | `~/.dsh/AGENTS.md`、`~/.claude/CLAUDE.md` | 追加一段带标记的分工说明（`<!-- dsh-delegate:start -->` … `end`），重装只替换这一段 |
 | Claude 桌面版配置、`~/.claude.json`、`~/.codex/config.toml` | 添加名为 `dsh` 的 MCP 服务 |
+| `~/.claude/settings.json`（只在加了 `--usage-hooks` 时） | statusLine 和 UserPromptSubmit hook |
 
 只有内容真的变了才写；写之前在同目录留一份 `*.bak-dsh-delegate-<时间>` 备份。
 
@@ -160,6 +162,24 @@ headless 读不到 DSH 桌面版里保存的 key，装好后要**在看板里配
 - 子代理能读整个仓库，只能写工作目录或 `write_scope`；默认 `workspace-write` 沙箱，无人值守（`--approval-policy never`）。
 - `dsh_job` 的 `cancel` 只终止这个作业自己的子代理，连同它们启动的子进程；别的作业不受影响。
 
+## 额度快用完时多派给 DSH
+
+Claude Code 或 Codex 的套餐额度快用完时，dsh-delegate 提醒它们把更多活派给 DSH。
+
+| 客户端 | 额度从哪来 | 怎么提醒 |
+|---|---|---|
+| Claude Code | statusline 数据里 5 小时和每周额度的已用百分比（claude.ai Pro / Max / Ultra 订阅才有）；`dsh-delegate statusline` 记到 `$DSH_HOME/quota/claude.json`，并在底栏显示额度和当前档位 | UserPromptSubmit hook（`dsh-delegate hook prompt`）在每次发消息时把提醒加进 Claude 的上下文 |
+| Codex | 直接读本地会话日志 `~/.codex/sessions`，不用配置 | 每次新会话开始，MCP 服务把当时的额度和派活要求放进给 Codex 的说明里 |
+| Claude 桌面版 | 与 Claude Code 共用套餐额度，取 Claude Code 最近记下的数字，可能已经过时 | MCP 服务启动时把额度和派活要求放进给 Claude 的说明里 |
+
+不会读取任何登录令牌。
+
+档位：任一窗口用到 70%（默认）进入「多派」：能写成自包含说明的活优先派给 DSH；用到 90%（默认）进入「全派」：除了必须自己拿主意的部分都派出去。两个阈值在看板的「额度与派活档位」卡片里改。额度不高时什么都不加。
+
+怎么开：安装时加 `--usage-hooks`。它会在 `~/.claude/settings.json` 里加 statusLine 和这个 hook，写之前备份；如果你已经有自己的 statusLine，保留不动，只加 hook（这时 Claude 的额度没人记录，可以在自己的 statusline 脚本里把输入转给 `dsh-delegate statusline`）。查看当前额度：`dsh-delegate quota`。卸载时会一并移除它加的 statusLine 和 hook。
+
+局限：只是很明确的提醒，派不派最终还是模型自己决定；Codex 的日志格式不是公开接口，读不到时什么都不做；Claude 桌面应用的 Code 标签可能不运行 statusline，这时只有终端里的 Claude Code 会更新数字。
+
 ## 看板与本机服务
 
 下面的 `dsh-delegate` 指 `node ~/.dsh/bridge/bin/dsh-delegate.js`（Windows 为 `node "$env:USERPROFILE\.dsh\bridge\bin\dsh-delegate.js"`）。
@@ -169,6 +189,7 @@ dsh-delegate ui --open         # 启动服务并在浏览器打开看板：http:
 dsh-delegate daemon --no-ui    # 只要 API，不要看板
 dsh-delegate autostart on      # 登录自启动
 dsh-delegate status
+dsh-delegate quota             # 查看 Claude / Codex 额度和当前档位
 ```
 
 服务只监听 `127.0.0.1`，只接受本机进程、本机页面（看板自己、`dsh web`）和 DSH 桌面版的请求；其他网站从浏览器发来的请求一律返回 403。如果确实需要放行别的来源，可以用环境变量 `DSH_DELEGATE_ALLOWED_ORIGINS` 追加。
@@ -191,7 +212,7 @@ dsh-delegate uninstall --remove-runtime
 dsh plugin --profile <profile> remove dsh-delegate    # 装过插件的话
 ```
 
-卸载会删掉 skill、分工说明段落、自己生成的启动器，以及三个客户端里指向本工具的 `dsh` 条目，并关闭登录自启动。别人的同名配置不会被删。想保留客户端配置就加 `--keep-clients`。
+卸载会删掉 skill、分工说明段落、自己生成的启动器、它加到 Claude Code 的 statusLine 和 hook，以及三个客户端里指向本工具的 `dsh` 条目，并关闭登录自启动。别人的同名配置不会被删。想保留客户端配置就加 `--keep-clients`。
 
 ## 已知边界
 
