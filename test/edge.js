@@ -49,6 +49,10 @@ function envFor(sb) {
     APPDATA: sb.appdata,
     LOCALAPPDATA: sb.local,
     HOME: sb.user,
+    // a developer's own CLAUDE_CONFIG_DIR / CODEX_HOME must never be touched by tests
+    // (CLAUDE_CONFIG_DIR = the sandbox home keeps the config at <home>/.claude.json)
+    CLAUDE_CONFIG_DIR: sb.user,
+    CODEX_HOME: path.join(sb.user, '.codex'),
   };
 }
 
