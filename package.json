@@ -38,8 +38,10 @@
     "doctor": "node bin/dsh-delegate.js doctor",
     "test": "node test/smoke.js",
     "test:edge": "node test/edge.js",
+    "test:regress": "node test/regress.js",
     "test:live": "node test/live.js",
-    "test:all": "node test/smoke.js && node test/edge.js"
+    "test:all": "node test/smoke.js && node test/edge.js && node test/regress.js",
+    "sync:plugin": "node -e \"const fs=require('fs');for(const f of fs.readdirSync('lib'))fs.copyFileSync('lib/'+f,'plugin/server/lib/'+f)\""
   },
   "keywords": [
     "mcp",
