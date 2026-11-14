@@ -6,33 +6,41 @@
     Installs the MCP server + launcher + skill + agent instructions, and wires
     the `dsh` MCP server into Claude Desktop, Claude Code and Codex where found.
 
-.EXAMPLE
-    pwsh -File install.ps1
+    Accepts PowerShell-style switches (-DryRun) and the same GNU-style flags as
+    install.sh (--dry-run, --targets=...), which are passed through unchanged.
 
 .EXAMPLE
-    pwsh -File install.ps1 -DryRun
+    .\install.ps1 -DryRun
 
 .EXAMPLE
-    pwsh -File install.ps1 -Targets claude-desktop,codex -CopyCredentials
+    .\install.ps1 --targets=claude-code --copy-credentials
+
+.EXAMPLE
+    .\install.ps1 -Targets claude-desktop,codex -CopyCredentials
 #>
 [CmdletBinding()]
 param(
     [switch]$DryRun,
     [switch]$CopyCredentials,
-    [string]$Targets = 'claude-desktop,claude-code,codex'
+    [switch]$Autostart,
+    [string[]]$Targets,
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$Rest
 )
 
 $ErrorActionPreference = 'Stop'
-$here = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 $node = Get-Command node -ErrorAction SilentlyContinue
 if (-not $node) {
-    throw '需要 Node.js 18 或更高版本：https://nodejs.org/'
+    throw 'dsh-delegate needs Node.js 18 or newer: https://nodejs.org/'
 }
 
-$args = @((Join-Path $here 'bin/dsh-delegate.js'), 'install', "--targets=$Targets")
-if ($DryRun) { $args += '--dry-run' }
-if ($CopyCredentials) { $args += '--copy-credentials' }
+$cliArgs = @((Join-Path $PSScriptRoot 'bin/dsh-delegate.js'), 'install')
+if ($Targets) { $cliArgs += "--targets=$($Targets -join ',')" }
+if ($DryRun) { $cliArgs += '--dry-run' }
+if ($CopyCredentials) { $cliArgs += '--copy-credentials' }
+if ($Autostart) { $cliArgs += '--autostart' }
+if ($Rest) { $cliArgs += $Rest }
 
-& $node.Source @args
+& $node.Source @cliArgs
 exit $LASTEXITCODE
