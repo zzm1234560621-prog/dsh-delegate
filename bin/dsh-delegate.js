@@ -391,6 +391,7 @@ async function commandStatusline() {
     const context = data.context_window && Number(data.context_window.used_percentage);
     const head = [model ? `[${model}]` : null, Number.isFinite(context) ? `ctx ${Math.round(context)}%` : null].filter(Boolean);
     const usage = windowsText(snapshot);
+    if (snapshot && snapshot.limit) usage.push('已触顶');
     const tag = level === 'high' || level === 'critical' ? `DSH ${LEVEL_LABEL[level]}` : 'DSH';
     line = [head.join(' '), usage.join(' · '), tag].filter(Boolean).join(' | ');
   } catch {
@@ -425,11 +426,18 @@ function commandQuota() {
   const { high, critical } = summary.thresholds;
   log(`档位：用到 ${high}% 起「多派」，${critical}% 起「全派」（看板里可改）`);
   for (const [name, item] of [['Claude', summary.claude], ['Codex', summary.codex]]) {
-    const usage = windowsText(item.snapshot);
+    const parts = windowsText(item.snapshot);
+    const limit = item.snapshot && item.snapshot.limit;
+    if (limit) {
+      const reset = quota.formatReset(limit.resetsAt);
+      parts.unshift(`已触顶（${quota.limitLabel(limit.type)}${reset ? `，${reset} 重置` : ''}）`);
+    }
     const age = item.snapshot ? `，${Math.max(0, Math.round((Date.now() - item.snapshot.at) / 60000))} 分钟前的数据` : '';
-    log(`  ${name.padEnd(7)} ${LEVEL_LABEL[item.level] || item.level}  ${usage.join(' · ') || '—'}${age}`);
+    log(`  ${name.padEnd(7)} ${LEVEL_LABEL[item.level] || item.level}  ${parts.join(' · ') || '—'}${age}`);
   }
-  if (summary.claude.level === 'unknown') log('  Claude 没有数据：在终端里用 Claude Code 并装了 --usage-hooks 才会记录。');
+  if (summary.claude.level === 'unknown') {
+    log('  Claude 没有数据：在终端里用 Claude Code 并装了 --usage-hooks 才会记录额度。');
+  }
 }
 
 function openBrowser(url) {

@@ -170,7 +170,7 @@ When the Claude Code or Codex plan quota runs low, dsh-delegate reminds them to 
 
 | Client | Where the quota comes from | How the reminder arrives |
 |---|---|---|
-| Claude Code | Used percentages for the 5-hour and weekly windows in the data Claude Code passes to the statusline (claude.ai Pro / Max / Ultra plans only); `dsh-delegate statusline` records them to `$DSH_HOME/quota/claude.json` and shows the quota and current tier in the Claude Code footer | A UserPromptSubmit hook (`dsh-delegate hook prompt`) adds the reminder to Claude's context on every message |
+| Claude Code | Used percentages for the 5-hour and weekly windows in the data Claude Code passes to the statusline (claude.ai Pro / Max / Ultra plans only); `dsh-delegate statusline` records them to `$DSH_HOME/quota/claude.json` and shows the quota and current tier in the Claude Code footer. The desktop Code tab never runs the statusline, so there an exhausted window is read from the 429 in `~/.claude/projects` session logs (exhausted + reset time only, no percentage) | A UserPromptSubmit hook (`dsh-delegate hook prompt`) adds the reminder to Claude's context on every message |
 | Codex | Read directly from its local session log `~/.codex/sessions`; no setup needed | At the start of every new session, the MCP server puts the current quota and delegation requirement into the instructions it gives Codex |
 | Claude Desktop | Shares the plan quota with Claude Code and uses the last figures Claude Code recorded, which may be out of date | At MCP server startup, puts the quota and delegation requirement into the instructions it gives Claude |
 
@@ -180,7 +180,7 @@ Tiers: when either window reaches 70% (default), "delegate more": work that can 
 
 Turning it on: install with `--usage-hooks`. It adds a statusLine and this hook to `~/.claude/settings.json`, with a backup first. If you already have your own statusLine, it's left alone and only the hook is added (in that case nothing records Claude's quota; you can forward the input to `dsh-delegate statusline` from your own statusline script). To see the current quota: `dsh-delegate quota`. Uninstall removes the statusLine and hook it added.
 
-Limits: it's only an explicit reminder; whether to delegate is still up to the model. Codex's log format isn't a public interface, so when it can't be read, nothing happens. The Code tab of the Claude desktop app may not run the statusline, so only Claude Code in the terminal updates the numbers then.
+Limits: it's only an explicit reminder; whether to delegate is still up to the model. Codex's log format isn't a public interface, so when it can't be read, nothing happens. The Code tab of the Claude desktop app never runs the statusline (verified), so only Claude Code in the terminal updates the percentages; when a desktop session exhausts a window, the dashboard reads that 429 from the session logs instead and shows "exhausted" with the reset time.
 
 ## Dashboard and local service
 
