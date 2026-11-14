@@ -17,6 +17,27 @@ const { dshHome } = require('./dsh');
 const { readSettings } = require('./config');
 
 const WINDOW_KEYS = ['five_hour', 'seven_day'];
+const LIMIT_LABELS = {
+  five_hour: '5 小时',
+  seven_day: '本周',
+  seven_day_opus: '本周 Opus',
+  seven_day_sonnet: '本周 Sonnet',
+};
+
+/** Human label for a rate-limit window type, e.g. 'five_hour' → '5 小时'. */
+function limitLabel(type) {
+  return LIMIT_LABELS[type] || '套餐';
+}
+
+/** The window slot a rate-limit type belongs to. */
+function limitWindow(type) {
+  return typeof type === 'string' && type.startsWith('seven_day') ? 'seven_day' : 'five_hour';
+}
+
+/** Where Claude Code keeps per-project session transcripts. */
+function claudeProjectsDir() {
+  return process.env.CLAUDE_PROJECTS_DIR || path.join(os.homedir(), '.claude', 'projects');
+}
 
 function quotaFile() {
   return path.join(dshHome(), 'quota', 'claude.json');
@@ -73,8 +94,8 @@ function recordClaude(statusInput, now = Date.now()) {
   return snapshot;
 }
 
-/** Read the last Claude snapshot, dropping windows that have already reset. */
-function readClaude(now = Date.now()) {
+/** Read the last Claude snapshot from disk, dropping windows that have already reset. */
+function readClaudeFile(now = Date.now()) {
   let parsed;
   try {
     parsed = JSON.parse(fs.readFileSync(quotaFile(), 'utf8'));
@@ -101,6 +122,22 @@ function readClaude(now = Date.now()) {
     at: finite(parsed.at) ? parsed.at : now,
     windows,
   };
+}
+
+/**
+ * Claude's quota as far as this machine can tell: the last statusline snapshot,
+ * plus the newest "this window is used up" record from a Claude Code session log.
+ * The desktop app's Code tab never runs the statusline, so for it the 429 written
+ * into the transcript is the only trace that a plan window is exhausted.
+ */
+function readClaude(now = Date.now()) {
+  const stored = readClaudeFile(now);
+  const limit = readClaudeLimit(now);
+  if (!stored) {
+    return limit ? { source: 'claude', at: limit.at, windows: {}, limit } : null;
+  }
+  if (limit && (!stored.limit || limit.at >= stored.limit.at)) stored.limit = limit;
+  return stored;
 }
 
 /** Directory entries, newest name first. Missing/unreadable directories are empty. */
@@ -153,6 +190,104 @@ function readTail(file, maxBytes = 512 * 1024) {
     fs.closeSync(fd);
   }
   return buffer.toString('utf8');
+}
+
+/** Claude Code transcripts under the projects root, newest first. */
+function transcriptFilesNewestFirst(root, maxFiles = 12) {
+  let projects;
+  try {
+    projects = fs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const files = [];
+  for (const project of projects) {
+    if (!project.isDirectory()) continue;
+    const dir = path.join(root, project.name);
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
+      const file = path.join(dir, entry.name);
+      try {
+        const stat = fs.statSync(file);
+        files.push({ file, mtimeMs: stat.mtimeMs, size: stat.size });
+      } catch {
+        /* an unreadable transcript is just skipped */
+      }
+    }
+  }
+  files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return files.slice(0, maxFiles);
+}
+
+/**
+ * One usage-limit record from a transcript → {at, type, window, resetsAt}, or null.
+ * Claude Code writes `{apiError:"usage_limit_reached", apiErrorParams:{rate_limit_info}}`
+ * (and, in newer builds, a parallel `quotaLimits`) when an API call is rejected.
+ */
+function limitRecord(event, now) {
+  if (!event || typeof event !== 'object') return null;
+  const info =
+    (event.apiErrorParams && event.apiErrorParams.rate_limit_info) || event.quotaLimits || null;
+  if (!info || typeof info !== 'object') return null;
+  if (typeof info.status === 'string' && info.status !== 'rejected') return null;
+  if (!finite(info.resetsAt) || info.resetsAt * 1000 <= now) return null;
+
+  const type =
+    typeof info.rateLimitType === 'string' && info.rateLimitType ? info.rateLimitType : 'five_hour';
+  const parsed = Date.parse(typeof event.timestamp === 'string' ? event.timestamp : '');
+  return {
+    at: Number.isFinite(parsed) ? parsed : now,
+    resetsAt: info.resetsAt,
+    type,
+    window: limitWindow(type),
+  };
+}
+
+let limitCache = { key: '', checkedAt: 0, value: null };
+
+/**
+ * The newest unexpired "window used up" record in the Claude Code session logs.
+ * null when no transcript has one, or when every one has already reset.
+ */
+function readClaudeLimit(now = Date.now(), root = claudeProjectsDir()) {
+  const files = transcriptFilesNewestFirst(root);
+  const newestFile = files[0];
+  const key = newestFile
+    ? `${root}|${newestFile.file}|${newestFile.mtimeMs}|${newestFile.size}`
+    : `${root}|empty`;
+  if (limitCache.key === key && now - limitCache.checkedAt < 10000) return limitCache.value;
+
+  let newest = null;
+  for (const entry of files) {
+    let text;
+    try {
+      text = readTail(entry.file, 256 * 1024);
+    } catch {
+      continue;
+    }
+    for (const line of text.split(/\r?\n/)) {
+      if (!line.includes('usage_limit_reached') && !line.includes('"quotaLimits"')) continue;
+      let event;
+      try {
+        // PowerShell-written test fixtures may carry a UTF-8 BOM.
+        event = JSON.parse(line.charCodeAt(0) === 0xfeff ? line.slice(1) : line);
+      } catch {
+        continue;
+      }
+      const record = limitRecord(event, now);
+      if (record && (!newest || record.at > newest.at)) newest = record;
+    }
+  }
+
+  limitCache = { key, checkedAt: now, value: newest };
+  return newest;
 }
 
 /** primary/secondary rate limits -> our two window slots, expired ones dropped. */
@@ -257,9 +392,16 @@ function thresholds() {
   return { high, critical };
 }
 
-/** 'unknown' | 'normal' | 'high' | 'critical' from the busiest window. */
+/** 'unknown' | 'normal' | 'high' | 'critical' from the busiest window (or a used-up one). */
 function level(snapshot, t = thresholds()) {
   if (!snapshot || typeof snapshot !== 'object') return 'unknown';
+  if (
+    snapshot.limit &&
+    finite(snapshot.limit.resetsAt) &&
+    snapshot.limit.resetsAt * 1000 > Date.now()
+  ) {
+    return 'critical';
+  }
   const windows = snapshot.windows && typeof snapshot.windows === 'object' ? snapshot.windows : {};
 
   let max = null;
@@ -303,8 +445,18 @@ function advice(snapshot, who, t = thresholds()) {
   const state = level(snapshot, t);
   if (state !== 'high' && state !== 'critical') return '';
 
-  const windows = snapshot && snapshot.windows && typeof snapshot.windows === 'object' ? snapshot.windows : {};
   const now = Date.now();
+  const limit = snapshot && snapshot.limit;
+  if (limit && finite(limit.resetsAt) && limit.resetsAt * 1000 > now) {
+    const reset = formatReset(limit.resetsAt, now);
+    return (
+      `${who} 的${limitLabel(limit.type)}额度已经用尽${reset ? `（${reset} 重置）` : ''}：` +
+      '除了必须自己拿主意的部分，能派的全部派给 DSH（dsh_task / dsh_parallel，互不依赖的活一次并行派出），' +
+      '尽量少在本会话里直接读写大文件。'
+    );
+  }
+
+  const windows = snapshot && snapshot.windows && typeof snapshot.windows === 'object' ? snapshot.windows : {};
   const labels = { five_hour: '5 小时', seven_day: '本周' };
   const parts = [];
   let max = null;
@@ -358,10 +510,12 @@ module.exports = {
   quotaFile,
   recordClaude,
   readClaude,
+  readClaudeLimit,
   readCodex,
   thresholds,
   level,
   advice,
   summary,
   formatReset,
+  limitLabel,
 };

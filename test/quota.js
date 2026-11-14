@@ -16,6 +16,7 @@ const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-quota-'));
 const DSH = path.join(ROOT, 'dsh');
 fs.mkdirSync(DSH, { recursive: true });
 process.env.DSH_HOME = DSH;
+process.env.CLAUDE_PROJECTS_DIR = path.join(ROOT, 'claude-projects');
 
 const quota = require('../lib/quota');
 
@@ -152,6 +153,90 @@ console.log('\n== recordClaude / readClaude ==');
 
   writeQuota('{ this is not json');
   check('文件损坏时返回 null', quota.readClaude(now) === null);
+}
+
+// ---------------------------------------------------------------- transcript fallback
+
+console.log('\n== readClaudeLimit（桌面 Code 标签的触顶记录）==');
+{
+  const projects = process.env.CLAUDE_PROJECTS_DIR;
+  const projectDir = path.join(projects, 'C--Users-zzm12');
+  fs.mkdirSync(projectDir, { recursive: true });
+  const at = new Date(now).toISOString();
+  fs.writeFileSync(
+    path.join(projectDir, 'd8f99f80.jsonl'),
+    [
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'hi' } }),
+      JSON.stringify({
+        type: 'assistant',
+        timestamp: at,
+        apiError: 'usage_limit_reached',
+        apiErrorParams: {
+          rate_limit_info: { status: 'rejected', resetsAt: future5, rateLimitType: 'five_hour' },
+        },
+        quotaLimits: { status: 'rejected', resetsAt: future5, rateLimitType: 'five_hour' },
+      }),
+    ].join('\n'),
+  );
+
+  const limit = quota.readClaudeLimit(now, projects);
+  check(
+    '从会话日志读到已触顶',
+    limit &&
+      limit.resetsAt === future5 &&
+      limit.type === 'five_hour' &&
+      limit.window === 'five_hour',
+  );
+
+  resetQuota();
+  const merged = quota.readClaude(now);
+  check(
+    '没有 statusline 快照时也能给出 limit',
+    merged &&
+      merged.source === 'claude' &&
+      Object.keys(merged.windows).length === 0 &&
+      merged.limit &&
+      merged.limit.resetsAt === future5,
+  );
+  check('触顶时档位为 critical', quota.level(merged, { high: 70, critical: 90 }) === 'critical');
+
+  const text = quota.advice(merged, 'Claude', { high: 70, critical: 90 });
+  check(
+    '触顶提示包含「已用尽」、重置时间与 dsh_task',
+    text.includes('额度已经用尽') && text.includes('重置') && text.includes('dsh_task'),
+  );
+
+  const expiredRoot = path.join(ROOT, 'claude-projects-expired');
+  fs.mkdirSync(path.join(expiredRoot, 'p'), { recursive: true });
+  fs.writeFileSync(
+    path.join(expiredRoot, 'p', 's.jsonl'),
+    JSON.stringify({
+      type: 'assistant',
+      timestamp: at,
+      apiError: 'usage_limit_reached',
+      apiErrorParams: {
+        rate_limit_info: { status: 'rejected', resetsAt: past, rateLimitType: 'five_hour' },
+      },
+    }),
+  );
+  check('重置时间已过的触顶被丢弃', quota.readClaudeLimit(now, expiredRoot) === null);
+  check('没有日志目录时返回 null', quota.readClaudeLimit(now, path.join(ROOT, 'nope')) === null);
+
+  const bomRoot = path.join(ROOT, 'claude-projects-bom');
+  fs.mkdirSync(path.join(bomRoot, 'p'), { recursive: true });
+  fs.writeFileSync(
+    path.join(bomRoot, 'p', 's.jsonl'),
+    `\uFEFF${JSON.stringify({
+      type: 'assistant',
+      timestamp: at,
+      quotaLimits: { status: 'rejected', resetsAt: future7, rateLimitType: 'seven_day' },
+    })}`,
+  );
+  const bom = quota.readClaudeLimit(now, bomRoot);
+  check(
+    '带 BOM 的行能解析，seven_day 映射到本周',
+    bom && bom.resetsAt === future7 && bom.window === 'seven_day' && bom.type === 'seven_day',
+  );
 }
 
 // ---------------------------------------------------------------- Codex

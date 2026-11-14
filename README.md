@@ -168,7 +168,7 @@ Claude Code 或 Codex 的套餐额度快用完时，dsh-delegate 提醒它们把
 
 | 客户端 | 额度从哪来 | 怎么提醒 |
 |---|---|---|
-| Claude Code | statusline 数据里 5 小时和每周额度的已用百分比（claude.ai Pro / Max / Ultra 订阅才有）；`dsh-delegate statusline` 记到 `$DSH_HOME/quota/claude.json`，并在底栏显示额度和当前档位 | UserPromptSubmit hook（`dsh-delegate hook prompt`）在每次发消息时把提醒加进 Claude 的上下文 |
+| Claude Code | statusline 数据里 5 小时和每周额度的已用百分比（claude.ai Pro / Max / Ultra 订阅才有）；`dsh-delegate statusline` 记到 `$DSH_HOME/quota/claude.json`，并在底栏显示额度和当前档位。桌面 Code 标签不运行 statusline，那里触顶时改从 `~/.claude/projects` 的会话日志里读 429（只有「已触顶 + 重置时间」，没有百分比） | UserPromptSubmit hook（`dsh-delegate hook prompt`）在每次发消息时把提醒加进 Claude 的上下文 |
 | Codex | 直接读本地会话日志 `~/.codex/sessions`，不用配置 | 每次新会话开始，MCP 服务把当时的额度和派活要求放进给 Codex 的说明里 |
 | Claude 桌面版 | 与 Claude Code 共用套餐额度，取 Claude Code 最近记下的数字，可能已经过时 | MCP 服务启动时把额度和派活要求放进给 Claude 的说明里 |
 
@@ -178,7 +178,7 @@ Claude Code 或 Codex 的套餐额度快用完时，dsh-delegate 提醒它们把
 
 怎么开：安装时加 `--usage-hooks`。它会在 `~/.claude/settings.json` 里加 statusLine 和这个 hook，写之前备份；如果你已经有自己的 statusLine，保留不动，只加 hook（这时 Claude 的额度没人记录，可以在自己的 statusline 脚本里把输入转给 `dsh-delegate statusline`）。查看当前额度：`dsh-delegate quota`。卸载时会一并移除它加的 statusLine 和 hook。
 
-局限：只是很明确的提醒，派不派最终还是模型自己决定；Codex 的日志格式不是公开接口，读不到时什么都不做；Claude 桌面应用的 Code 标签可能不运行 statusline，这时只有终端里的 Claude Code 会更新数字。
+局限：只是很明确的提醒，派不派最终还是模型自己决定；Codex 的日志格式不是公开接口，读不到时什么都不做；Claude 桌面应用的 Code 标签不会运行 statusline（实测），百分比只有终端里的 Claude Code 会更新——桌面会话用完某个窗口时，看板改从会话日志里读那条 429，显示「已触顶」和重置时间。
 
 ## 看板与本机服务
 
