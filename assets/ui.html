@@ -153,6 +153,41 @@
   .run-events .turn { color: var(--warn); }
   .run-events .text { color: #b9c2d6; }
   .run-events .result { color: #7fd6a8; opacity: .85; }
+  .quota-error { margin: 0 0 10px; }
+  .quota-error[hidden] { display: none; }
+  .quota-row { border-top: 1px dashed var(--line); padding: 12px 0; }
+  .quota-row:first-child { border-top: 0; padding-top: 2px; }
+  .quota-row-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .quota-name { font-weight: 600; }
+  .quota-fresh { margin: 0 0 0 auto; font-size: 11px; }
+  .quota-window {
+    display: grid; grid-template-columns: 52px 44px minmax(80px, 1fr) auto;
+    gap: 8px; align-items: center; margin-top: 8px; font-size: 12px;
+  }
+  .quota-window-name { color: var(--muted); }
+  .quota-window-pct { font-variant-numeric: tabular-nums; text-align: right; }
+  .quota-bar {
+    height: 6px; border-radius: 999px; background: var(--panel-2);
+    border: 1px solid var(--line); overflow: hidden;
+  }
+  .quota-bar-fill { height: 100%; background: var(--ok); border-radius: 999px; transition: width .3s ease; }
+  .quota-bar-fill.quota-warn { background: var(--warn); }
+  .quota-bar-fill.quota-danger { background: var(--err); }
+  .quota-reset { color: var(--muted); white-space: nowrap; }
+  .pill.quota-badge-critical {
+    color: #fff; background: rgba(244,91,105,.24); border-color: var(--err);
+    box-shadow: 0 0 0 1px rgba(244,91,105,.35);
+  }
+  .quota-thresholds {
+    display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
+    margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line);
+  }
+  .quota-field { width: 110px; }
+  .quota-thresholds .msg { margin: 0 0 9px; }
+  @media (max-width: 720px) {
+    .quota-window { grid-template-columns: 52px 44px 1fr; }
+    .quota-reset { grid-column: 1 / -1; }
+  }
 </style>
 </head>
 <body>
@@ -261,6 +296,42 @@
       <span class="msg" id="model-msg" style="margin:0"></span>
     </div>
     <p class="hint">写入 <span class="mono" id="patch-path"></span> 里的标记块，下次派活生效。</p>
+  </section>
+
+  <section id="quota-section">
+    <h2><span class="dot"></span>额度与派活档位</h2>
+    <div class="hint quota-error" id="quota-error" hidden></div>
+    <div class="quota-list">
+      <div class="quota-row" id="quota-claude">
+        <div class="quota-row-head">
+          <span class="quota-name">Claude</span>
+          <span class="pill warn" id="quota-claude-level">无数据</span>
+          <span class="hint quota-fresh" id="quota-claude-fresh"></span>
+        </div>
+        <div class="quota-body" id="quota-claude-body"></div>
+      </div>
+      <div class="quota-row" id="quota-codex">
+        <div class="quota-row-head">
+          <span class="quota-name">Codex</span>
+          <span class="pill warn" id="quota-codex-level">无数据</span>
+          <span class="hint quota-fresh" id="quota-codex-fresh"></span>
+        </div>
+        <div class="quota-body" id="quota-codex-body"></div>
+      </div>
+    </div>
+    <div class="quota-thresholds">
+      <div class="quota-field">
+        <label for="quota-high">多派阈值 %</label>
+        <input id="quota-high" type="number" min="1" max="100" step="1" />
+      </div>
+      <div class="quota-field">
+        <label for="quota-critical">全派阈值 %</label>
+        <input id="quota-critical" type="number" min="1" max="100" step="1" />
+      </div>
+      <button id="quota-save">保存阈值</button>
+      <div class="msg" id="quota-msg"></div>
+    </div>
+    <p class="hint">达到多派/全派时，Claude Code 每次收到你的消息会被提醒多把活派给 DSH；Codex 在新会话开始时收到同样的提醒。</p>
   </section>
 
 <section>
@@ -757,6 +828,192 @@ function renderSettings() {
   el('concurrency').value = settings.maxConcurrency;
   el('storage').value = settings.maxStorageMb;
   el('settings-path').textContent = state.config.settingsFile;
+  quotaSyncThresholdInputs({
+    high: quotaNumber(settings.quotaHighPct, 70),
+    critical: quotaNumber(settings.quotaCriticalPct, 90),
+  });
+}
+
+const QUOTA_PROVIDERS = [
+  { id: 'claude', hint: '在终端里用 Claude Code（安装时加 --usage-hooks）时才会记录额度。' },
+  { id: 'codex', hint: '还没读到 Codex 的会话日志（~/.codex/sessions）。' },
+];
+const QUOTA_LEVELS = {
+  normal: { cls: 'pill ok', text: '正常' },
+  high: { cls: 'pill warn', text: '多派' },
+  critical: { cls: 'pill warn quota-badge-critical', text: '全派' },
+  unknown: { cls: 'pill warn', text: '无数据' },
+};
+const QUOTA_WINDOWS = [['five_hour', '5 小时'], ['seven_day', '本周']];
+let quotaHasData = false;
+let quotaThresholdsDirty = false;
+
+function quotaPad(value) { return String(value).padStart(2, '0'); }
+
+function quotaNumber(value, fallback) {
+  if (value === null || value === undefined || value === '') return fallback;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function quotaResetText(resetsAt) {
+  const stamp = Number(resetsAt);
+  if (!Number.isFinite(stamp)) return '';
+  const date = new Date(stamp * 1000);
+  if (Number.isNaN(date.getTime())) return '';
+  const now = new Date();
+  const time = quotaPad(date.getHours()) + ':' + quotaPad(date.getMinutes());
+  if (date.toDateString() === now.toDateString()) return time + ' 重置';
+  return (date.getMonth() + 1) + '月' + date.getDate() + '日 ' + time + ' 重置';
+}
+
+function quotaFreshness(at) {
+  const stamp = Number(at);
+  if (!Number.isFinite(stamp)) return '';
+  const minutes = Math.floor((Date.now() - stamp) / 60000);
+  if (minutes < 1) return '刚刚更新';
+  if (minutes < 60) return minutes + ' 分钟前更新';
+  return Math.floor(minutes / 60) + ' 小时前更新';
+}
+
+function quotaHint(text) {
+  const div = document.createElement('div');
+  div.className = 'hint';
+  div.textContent = text;
+  return div;
+}
+
+function quotaThresholds(data) {
+  const source = data && data.thresholds ? data.thresholds : {};
+  return {
+    high: quotaNumber(source.high, 70),
+    critical: quotaNumber(source.critical, 90),
+  };
+}
+
+function quotaWindowRow(label, window, thresholds) {
+  if (!window || !Number.isFinite(Number(window.used))) return null;
+  const raw = Number(window.used);
+  const used = Math.max(0, Math.min(100, Math.round(raw)));
+  const row = document.createElement('div');
+  row.className = 'quota-window';
+
+  const name = document.createElement('span');
+  name.className = 'quota-window-name';
+  name.textContent = label;
+
+  const pct = document.createElement('span');
+  pct.className = 'quota-window-pct';
+  pct.textContent = used + '%';
+
+  const bar = document.createElement('div');
+  bar.className = 'quota-bar';
+  const fill = document.createElement('div');
+  fill.className = 'quota-bar-fill';
+  fill.style.width = used + '%';
+  if (raw >= thresholds.critical) fill.classList.add('quota-danger');
+  else if (raw >= thresholds.high) fill.classList.add('quota-warn');
+  bar.appendChild(fill);
+
+  const reset = document.createElement('span');
+  reset.className = 'quota-reset';
+  reset.textContent = quotaResetText(window.resetsAt);
+
+  row.append(name, pct, bar, reset);
+  return row;
+}
+
+function renderQuotaProvider(provider, info, thresholds) {
+  const badge = el('quota-' + provider.id + '-level');
+  const fresh = el('quota-' + provider.id + '-fresh');
+  const body = el('quota-' + provider.id + '-body');
+  if (!badge || !fresh || !body) return;
+
+  const level = info && QUOTA_LEVELS[info.level] ? info.level : 'unknown';
+  badge.className = QUOTA_LEVELS[level].cls;
+  badge.textContent = QUOTA_LEVELS[level].text;
+
+  const snapshot = info && info.snapshot ? info.snapshot : null;
+  fresh.textContent = snapshot ? quotaFreshness(snapshot.at) : '';
+
+  body.innerHTML = '';
+  if (!snapshot) {
+    body.appendChild(quotaHint(provider.hint));
+    return;
+  }
+
+  const windows = snapshot.windows || {};
+  let count = 0;
+  for (const [key, label] of QUOTA_WINDOWS) {
+    const row = quotaWindowRow(label, windows[key], thresholds);
+    if (row) {
+      body.appendChild(row);
+      count += 1;
+    }
+  }
+  if (!count) body.appendChild(quotaHint('这份快照里还没有额度窗口。'));
+}
+
+function quotaSyncThresholdInputs(thresholds) {
+  const pairs = [['quota-high', thresholds.high], ['quota-critical', thresholds.critical]];
+  for (const [id, value] of pairs) {
+    const input = el(id);
+    if (!input || quotaThresholdsDirty || document.activeElement === input) continue;
+    input.value = String(value);
+  }
+}
+
+function renderQuota(data) {
+  const thresholds = quotaThresholds(data);
+  for (const provider of QUOTA_PROVIDERS) {
+    renderQuotaProvider(provider, data ? data[provider.id] : null, thresholds);
+  }
+  quotaSyncThresholdInputs(thresholds);
+  const error = el('quota-error');
+  if (error) error.hidden = true;
+  quotaHasData = true;
+}
+
+function showQuotaError(cause) {
+  const error = el('quota-error');
+  if (error) {
+    error.hidden = false;
+    error.textContent = '额度数据读取失败：' + (cause && cause.message ? cause.message : '未知原因') + '；其它卡片不受影响，稍后自动重试。';
+  }
+  if (quotaHasData) return;
+  for (const provider of QUOTA_PROVIDERS) {
+    const badge = el('quota-' + provider.id + '-level');
+    if (badge) {
+      badge.className = QUOTA_LEVELS.unknown.cls;
+      badge.textContent = QUOTA_LEVELS.unknown.text;
+    }
+    const fresh = el('quota-' + provider.id + '-fresh');
+    if (fresh) fresh.textContent = '';
+    const body = el('quota-' + provider.id + '-body');
+    if (body) {
+      body.innerHTML = '';
+      body.appendChild(quotaHint('暂时读不到额度数据。'));
+    }
+  }
+}
+
+async function loadQuota() {
+  try {
+    const data = await api('/api/quota');
+    renderQuota(data || {});
+  } catch (cause) {
+    showQuotaError(cause);
+  }
+}
+
+function quotaReadThresholdInputs() {
+  const highText = el('quota-high').value.trim();
+  const criticalText = el('quota-critical').value.trim();
+  if (!/^\d+$/.test(highText) || !/^\d+$/.test(criticalText)) return null;
+  const high = Number(highText);
+  const critical = Number(criticalText);
+  if (high < 1 || high >= critical || critical > 100) return null;
+  return { high, critical };
 }
 
 function renderEnv() {
@@ -1198,6 +1455,36 @@ el('save-settings').addEventListener('click', async () => {
   }
 });
 
+el('quota-save').addEventListener('click', async () => {
+  const msg = el('quota-msg');
+  const values = quotaReadThresholdInputs();
+  if (!values) {
+    msg.className = 'msg err';
+    msg.textContent = '阈值必须是整数，且 1 ≤ 多派 < 全派 ≤ 100。';
+    return;
+  }
+  msg.className = 'msg';
+  msg.textContent = '保存中…';
+  try {
+    await api('/api/settings', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ quotaHighPct: values.high, quotaCriticalPct: values.critical }),
+    });
+    quotaThresholdsDirty = false;
+    msg.className = 'msg ok';
+    msg.textContent = '已保存';
+    await loadQuota();
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = cause.message;
+  }
+});
+
+for (const id of ['quota-high', 'quota-critical']) {
+  el(id).addEventListener('input', () => { quotaThresholdsDirty = true; });
+}
+
 el('save-env').addEventListener('click', async () => {
   const msg = el('env-msg');
   msg.className = 'msg';
@@ -1292,6 +1579,8 @@ load().catch((cause) => {
 el('conn-retry').addEventListener('click', () => load().catch(showDisconnected));
 
 // Poll regardless of the first load outcome, so a restarting service heals itself.
+loadQuota();
+setInterval(loadQuota, 15000);
 startRunPolling();
 setInterval(() => {
   if (!state) load().catch(() => {});

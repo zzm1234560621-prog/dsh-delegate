@@ -28,7 +28,7 @@ function parseArgs(argv) {
 }
 
 const KNOWN_FLAGS = {
-  install: ['dry-run', 'targets', 'no-clients', 'autostart', 'port', 'copy-credentials', 'dsh-app'],
+  install: ['dry-run', 'targets', 'no-clients', 'autostart', 'port', 'copy-credentials', 'usage-hooks', 'dsh-app'],
   uninstall: ['remove-runtime', 'keep-clients', 'dsh-app'],
 };
 
@@ -85,6 +85,8 @@ function runtimeContext() {
   return {
     nodePath: process.execPath,
     mcpPath: path.join(bridgeDir(), 'lib', 'mcp.js'),
+    cliPath: path.join(bridgeDir(), 'bin', 'dsh-delegate.js'),
+    nodeOnPath: Boolean(dsh.which('node')),
     dshHome: dsh.dshHome(),
   };
 }
@@ -171,6 +173,13 @@ async function commandInstall(args) {
     }
   }
 
+  // Opt-in: Claude Code records its plan quota and gets told to delegate more when low.
+  if (args['usage-hooks']) {
+    for (const item of require('../lib/claude-hooks').apply(ctx, { dryRun })) {
+      results.push({ what: item.target, ...item });
+    }
+  }
+
   if (args.autostart && !dryRun) {
     const result = require('../lib/autostart').enable({ port: Number(args.port) || 7788 });
     results.push({ what: 'autostart', status: 'written', file: `${result.mechanism} → ${result.target}` });
@@ -232,8 +241,10 @@ function commandUninstall(args) {
   if (!args['keep-clients']) {
     // Only entries that start a dsh-delegate mcp.js; someone else's "dsh" server stays.
     for (const item of targets.removeAll()) removed.push({ what: `client:${item.target}`, ...item });
+    // The statusLine / prompt hook that `install --usage-hooks` added, nothing else.
+    for (const item of require('../lib/claude-hooks').remove()) removed.push({ what: item.target, ...item });
   }
-  if (autostart.status().enabled) {
+  if (autostart.status().ours) {
     const after = autostart.disable();
     removed.push({ what: 'autostart', status: after.enabled ? 'FAILED' : 'removed', file: after.target });
   }
@@ -325,6 +336,102 @@ function commandPrintConfig() {
   log(launch);
 }
 
+// ---------------------------------------------------------------- quota-aware delegation
+
+const LEVEL_LABEL = { normal: '正常', high: '多派', critical: '全派', unknown: '无数据' };
+
+/** Whatever arrives on stdin within `timeoutMs` (hooks and status lines pipe JSON in). */
+function readStdin(timeoutMs) {
+  return new Promise((resolve) => {
+    if (process.stdin.isTTY) {
+      resolve('');
+      return;
+    }
+    let data = '';
+    const done = () => {
+      clearTimeout(timer);
+      resolve(data);
+    };
+    const timer = setTimeout(done, timeoutMs);
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => {
+      data += chunk;
+    });
+    process.stdin.on('end', done);
+    process.stdin.on('error', done);
+  });
+}
+
+function windowsText(snapshot) {
+  const windows = (snapshot && snapshot.windows) || {};
+  return [
+    windows.five_hour ? `5h ${Math.round(windows.five_hour.used)}%` : null,
+    windows.seven_day ? `周 ${Math.round(windows.seven_day.used)}%` : null,
+  ].filter(Boolean);
+}
+
+/**
+ * Claude Code statusLine: record the plan quota it reports, print a one-line footer.
+ * It runs on every UI refresh, so it must be quick and must never print an error.
+ */
+async function commandStatusline() {
+  let line = 'DSH';
+  try {
+    const input = await readStdin(1500);
+    let data = {};
+    try {
+      data = JSON.parse(input || '{}') || {};
+    } catch {
+      data = {};
+    }
+    const quota = require('../lib/quota');
+    const snapshot = quota.recordClaude(data) || quota.readClaude();
+    const level = quota.level(snapshot);
+    const model = data.model && data.model.display_name;
+    const context = data.context_window && Number(data.context_window.used_percentage);
+    const head = [model ? `[${model}]` : null, Number.isFinite(context) ? `ctx ${Math.round(context)}%` : null].filter(Boolean);
+    const usage = windowsText(snapshot);
+    const tag = level === 'high' || level === 'critical' ? `DSH ${LEVEL_LABEL[level]}` : 'DSH';
+    line = [head.join(' '), usage.join(' · '), tag].filter(Boolean).join(' | ');
+  } catch {
+    /* the footer still shows "DSH" */
+  }
+  process.stdout.write(`${line}\n`);
+  process.exit(0);
+}
+
+/** Claude Code hooks. `prompt` (UserPromptSubmit): ask Claude to delegate more when quota runs low. */
+async function commandHook(args) {
+  await readStdin(1000);
+  try {
+    if (args._[1] === 'prompt') {
+      const quota = require('../lib/quota');
+      const text = quota.advice(quota.readClaude(), 'Claude');
+      if (text) {
+        process.stdout.write(
+          `${JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } })}\n`,
+        );
+      }
+    }
+  } catch {
+    /* a hook must never get in the way of the prompt */
+  }
+  process.exit(0);
+}
+
+function commandQuota() {
+  const quota = require('../lib/quota');
+  const summary = quota.summary();
+  const { high, critical } = summary.thresholds;
+  log(`档位：用到 ${high}% 起「多派」，${critical}% 起「全派」（看板里可改）`);
+  for (const [name, item] of [['Claude', summary.claude], ['Codex', summary.codex]]) {
+    const usage = windowsText(item.snapshot);
+    const age = item.snapshot ? `，${Math.max(0, Math.round((Date.now() - item.snapshot.at) / 60000))} 分钟前的数据` : '';
+    log(`  ${name.padEnd(7)} ${LEVEL_LABEL[item.level] || item.level}  ${usage.join(' · ') || '—'}${age}`);
+  }
+  if (summary.claude.level === 'unknown') log('  Claude 没有数据：在终端里用 Claude Code 并装了 --usage-hooks 才会记录。');
+}
+
 function openBrowser(url) {
   const { spawn } = require('node:child_process');
   const command = process.platform === 'win32' ? process.env.ComSpec || 'cmd.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
@@ -413,11 +520,16 @@ async function main() {
   if (command === 'daemon' || command === 'service') return commandDaemon(args);
   if (command === 'autostart') return commandAutostart(args);
   if (command === 'status') return commandStatus();
+  if (command === 'statusline') return commandStatusline();
+  if (command === 'hook') return commandHook(args);
+  if (command === 'quota') return commandQuota();
 
   log(`dsh-delegate ${pkg.version} — 让 Claude / Codex 把简单任务派给本机 DeepSeek Harness
 
 用法：
-  dsh-delegate install [--targets=claude-desktop,claude-code,codex] [--dry-run] [--copy-credentials] [--autostart]
+  dsh-delegate install [--targets=claude-desktop,claude-code,codex] [--dry-run] [--copy-credentials] [--autostart] [--usage-hooks]
+  dsh-delegate quota                                     # Claude / Codex 额度和当前派活档位
+  dsh-delegate statusline | hook prompt                  # Claude Code 的 statusLine / UserPromptSubmit（--usage-hooks 配好）
   dsh-delegate daemon [--port=7788] [--no-ui] [--open]   # 常驻服务（可选是否带看板）
   dsh-delegate ui [--port=7788] [--open]                 # daemon + 看板（--open 顺便打开浏览器）
   dsh-delegate autostart on|off|status [--port=7788]     # 登录自启动（默认仅 API）
