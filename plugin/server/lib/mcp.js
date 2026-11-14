@@ -17,7 +17,24 @@ const { runTask, mapLimit, killAll, killTree } = require('./dsh');
 const { readSettings } = require('./config');
 const runlog = require('./runlog');
 
-const SERVER_INFO = { name: 'dsh-delegate', version: '1.1.0' };
+/**
+ * The version that ships with this copy: the repo / ~/.dsh/bridge have package.json
+ * next to lib/, the plugin's bundled copy one level further up. A hard-coded string
+ * drifted (still said 1.1.0 after the 1.3.0 release).
+ */
+function packageVersion() {
+  for (const candidate of ['../package.json', '../../package.json']) {
+    try {
+      const version = require(candidate).version;
+      if (typeof version === 'string' && version) return version;
+    } catch {
+      /* try the next one */
+    }
+  }
+  return '0.0.0';
+}
+
+const SERVER_INFO = { name: 'dsh-delegate', version: packageVersion() };
 const PROTOCOL_FALLBACK = '2024-11-05';
 const DEFAULT_CONCURRENCY = 0; // 0 = 不限制
 const DEFAULT_SOFT_WAIT_MS = 45_000;

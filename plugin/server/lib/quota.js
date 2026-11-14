@@ -47,6 +47,20 @@ function finite(value) {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+/** Length of each window slot, for windows recorded without a reset time. */
+const WINDOW_MS = { five_hour: 5 * 60 * 60 * 1000, seven_day: 7 * 24 * 60 * 60 * 1000 };
+
+/**
+ * Whether a window still applies: until its reset time, or, when none was recorded
+ * (a hand-fed or partial sample), until one window length after it was seen.
+ * Without the second rule such a sample never expired and the prompt hook kept
+ * repeating its percentage forever.
+ */
+function windowLive(resetsAt, seenAt, lengthMs, now) {
+  if (finite(resetsAt)) return resetsAt * 1000 > now;
+  return finite(seenAt) && finite(lengthMs) && now < seenAt + lengthMs;
+}
+
 /** One Claude statusline window, or null when the percentage is unusable. */
 function claudeWindow(raw) {
   if (!raw || typeof raw !== 'object') return null;
@@ -110,7 +124,7 @@ function readClaudeFile(now = Date.now()) {
   for (const key of WINDOW_KEYS) {
     const raw = parsed.windows[key];
     if (!raw || typeof raw !== 'object' || !finite(raw.used)) continue;
-    if (finite(raw.resetsAt) && raw.resetsAt * 1000 <= now) continue;
+    if (!windowLive(raw.resetsAt, parsed.at, WINDOW_MS[key], now)) continue;
     const window = { used: raw.used };
     if (finite(raw.resetsAt)) window.resetsAt = raw.resetsAt;
     windows[key] = window;
@@ -297,14 +311,14 @@ function readClaudeLimit(now = Date.now(), root = claudeProjectsDir()) {
 }
 
 /** primary/secondary rate limits -> our two window slots, expired ones dropped. */
-function codexWindows(limits, now) {
+function codexWindows(limits, now, seenAt) {
   const windows = {};
   for (const key of ['primary', 'secondary']) {
     const raw = limits[key];
     if (!raw || typeof raw !== 'object') continue;
     if (!finite(raw.used_percent)) continue;
     if (!finite(raw.window_minutes)) continue;
-    if (finite(raw.resets_at) && raw.resets_at * 1000 <= now) continue;
+    if (!windowLive(raw.resets_at, seenAt, raw.window_minutes * 60_000, now)) continue;
 
     const slot = raw.window_minutes <= 1440 ? 'five_hour' : 'seven_day';
     const window = { used: raw.used_percent };
@@ -346,7 +360,7 @@ function rolloutSnapshot(file, mtimeMs, now) {
     if (!limits || typeof limits !== 'object') continue;
     if (!limits.primary && !limits.secondary) continue;
 
-    const windows = codexWindows(limits, now);
+    const windows = codexWindows(limits, now, mtimeMs);
     if (Object.keys(windows).length === 0) return null;
     return { source: 'codex', at: mtimeMs, windows };
   }

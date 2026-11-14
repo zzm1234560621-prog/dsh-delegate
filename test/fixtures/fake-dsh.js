@@ -21,9 +21,11 @@ process.stdin.on('end', () => {
   emit({ type: 'status', phase: 'turn_start', turn: 1 });
   emit({ type: 'tool_call', name: 'bash', input: { command: 'echo fake' } });
   setTimeout(() => {
+    // "ECHO_TASK" anywhere in the task: return the full text the worker received.
+    const echo = input.includes('ECHO_TASK') ? `\n${input}` : '';
     emit({
       type: 'final',
-      text: `fake-dsh ok ${JSON.stringify({ cwd: process.cwd(), args, bytes: input.length })}`,
+      text: `fake-dsh ok ${JSON.stringify({ cwd: process.cwd(), args, bytes: input.length })}${echo}`,
       reason: { kind: 'completed' },
       sessionId,
     });
