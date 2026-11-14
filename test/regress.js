@@ -357,7 +357,11 @@ async function mcpSuite() {
   const jobOf = (reply) => (text(reply).match(/job=(dsh-[\w-]+)/) || [])[1];
   const call = (name, args, meta) => send('tools/call', { name, arguments: args, ...(meta ? { _meta: meta } : {}) });
 
-  await send('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'regress', version: '1' } });
+  const init = await send('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'regress', version: '1' } });
+  const shipped = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
+  check('serverInfo 版本与 package.json 一致', init.result && init.result.serverInfo.version === shipped, `${init.result && init.result.serverInfo.version} vs ${shipped}`);
+  const echoed = await call('dsh_task', { task: 'ECHO_TASK 看看收到什么', cwd: sb.dir });
+  check('派出去的任务开头告诉子代理不要再往下派', /不要再调用 dsh/.test(text(echoed)), text(echoed).split('\n').slice(1, 2).join(''));
 
   const inline = await call('dsh_task', { task: 'hi', cwd: sb.dir });
   check('dsh_task 直接返回结果（假 DSH）', /DSH ok/.test(text(inline)), text(inline).split('\n')[0]);
@@ -498,6 +502,35 @@ async function quotaSuite() {
 
   check('statusline 收到坏输入照常输出', /DSH/.test(run(['statusline'], 'not json').stdout));
   check('hook 收到坏输入照常退出', run(['hook', 'prompt'], 'not json').status === 0);
+  // A sample without resets_at (hand-fed or partial) must still expire.
+  const quotaFile = path.join(sb.home, 'quota', 'claude.json');
+  const saved = fs.readFileSync(quotaFile, 'utf8');
+  const fed = (ageMs) =>
+    fs.writeFileSync(quotaFile, JSON.stringify({ source: 'claude', at: Date.now() - ageMs, windows: { five_hour: { used: 82 }, seven_day: { used: 41 } } }));
+  fed(6 * 3600_000);
+  const stale = contextOf(run(['hook', 'prompt'], '{}'));
+  check('没有重置时间、6 小时前记下的 5 小时窗口已失效', !/5 小时 82%/.test(stale), stale.slice(0, 60));
+  fed(3600_000);
+  check('同样的数据 1 小时前记下的仍然有效', /82%/.test(contextOf(run(['hook', 'prompt'], '{}'))));
+  fs.writeFileSync(quotaFile, saved);
+
+  const codexHome = path.join(sb.dir, 'codex-noreset');
+  const dayDir = path.join(codexHome, 'sessions', '2026', '11', '14');
+  fs.mkdirSync(dayDir, { recursive: true });
+  const rollout = path.join(dayDir, 'rollout-noreset.jsonl');
+  fs.writeFileSync(
+    rollout,
+    `${JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', rate_limits: { primary: { used_percent: 88, window_minutes: 300 }, secondary: { used_percent: 30, window_minutes: 10080 } } } })}\n`,
+  );
+  const sixHoursAgo = (Date.now() - 6 * 3600_000) / 1000;
+  fs.utimesSync(rollout, sixHoursAgo, sixHoursAgo);
+  const codexSnap = require(path.join(ROOT, 'lib', 'quota.js')).readCodex(Date.now(), codexHome);
+  check(
+    'Codex 没有重置时间的窗口按 window_minutes 过期（5 小时已过、本周仍在）',
+    Boolean(codexSnap) && !codexSnap.windows.five_hour && Boolean(codexSnap.windows.seven_day),
+    JSON.stringify(codexSnap && codexSnap.windows),
+  );
+
   const listing = run(['quota'], '');
   check('quota 命令列出 Claude 和 Codex', listing.status === 0 && /Claude/.test(listing.stdout) && /Codex/.test(listing.stdout), listing.stdout.trim());
 

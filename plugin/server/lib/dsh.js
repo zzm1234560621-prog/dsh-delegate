@@ -305,6 +305,14 @@ function installCommand(launch) {
   return `${launch.command} --profile headless`;
 }
 
+/**
+ * First line of every delegated task. The worker reads the same AGENTS.md that tells
+ * agents to hand simple work to DSH, and without this it re-delegated its own task to
+ * yet another headless run (seen live: a "run the tests" task called `dsh headless`).
+ */
+const SUBAGENT_NOTE =
+  '[派活说明] 你就是被派出来的 DSH 子代理：自己把这件活做完，不要再调用 dsh / dsh_task / dsh_parallel 往下派。';
+
 /** Extra header the worker reads: it declares the single writable root. */
 function scopeBlock(scopeAbs, rootAbs, relScope) {
   return [
@@ -584,7 +592,9 @@ function runTask(input) {
       finish(code === null ? 'killed' : code);
     });
 
-    const taskText = scopeRel ? `${scopeBlock(scopeAbs, rootCwd, scopeRel)}\n\n${task}` : task;
+    const taskText = [SUBAGENT_NOTE, scopeRel ? scopeBlock(scopeAbs, rootCwd, scopeRel) : null, task]
+      .filter(Boolean)
+      .join('\n\n');
     try {
       child.stdin.end(taskText, 'utf8');
     } catch {
