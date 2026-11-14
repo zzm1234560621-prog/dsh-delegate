@@ -13,7 +13,7 @@
  *   shows live activity.
  */
 
-const { runTask, mapLimit, killAll } = require('./dsh');
+const { runTask, mapLimit, killAll, killTree } = require('./dsh');
 const { readSettings } = require('./config');
 const runlog = require('./runlog');
 
@@ -208,8 +208,23 @@ function startJob(meta, runner) {
     progress: [],
     result: null,
     error: null,
+    cancelled: false,
+    children: new Set(), // this job's worker processes, so cancel stops only them
+    lastProgressAt: 0,
+    run: null,
   };
   jobs.set(id, job);
+
+  const control = {
+    track(child) {
+      job.children.add(child);
+      child.once('close', () => job.children.delete(child));
+      if (job.cancelled) killTree(child);
+    },
+    get cancelled() {
+      return job.cancelled;
+    },
+  };
 
   // Mirror the run to disk so the local UI can watch several subagents at once.
   // A parallel batch gets one run record per task instead of one aggregate record.
@@ -221,6 +236,7 @@ function startJob(meta, runner) {
       run = null;
     }
   }
+  job.run = run;
 
   const onEvent = (event) => {
     const note = describeEvent(event);
@@ -233,8 +249,9 @@ function startJob(meta, runner) {
     emitProgress(job);
   };
 
-  job.promise = runner(onEvent)
+  job.promise = runner(onEvent, control)
     .then((result) => {
+      if (job.cancelled) return result; // cancel already recorded the outcome
       job.state = 'done';
       job.result = result;
       job.endedAt = Date.now();
@@ -253,6 +270,7 @@ function startJob(meta, runner) {
       return result;
     })
     .catch((cause) => {
+      if (job.cancelled) return;
       job.state = 'failed';
       job.error = cause && cause.message ? cause.message : String(cause);
       job.endedAt = Date.now();
@@ -301,17 +319,20 @@ function describeEvent(event) {
   return null;
 }
 
-/** Progress notifications keep some hosts from treating the call as hung. */
-const progressTokens = new Map(); // job id -> token set by the caller
+/**
+ * Progress notifications keep some hosts from treating the call as hung.
+ * A token is only valid while the request that carried it is still open, so it is
+ * registered for the duration of one tools/call and dropped before the reply.
+ */
+const progressTokens = new Map(); // job id -> token of the call currently waiting on it
 
-let lastProgressAt = 0;
 function emitProgress(job) {
   const token = progressTokens.get(job.id);
   if (token === undefined) return;
   const now = Date.now();
   const finished = job.state !== 'running';
-  if (!finished && now - lastProgressAt < 1200) return;
-  lastProgressAt = now;
+  if (!finished && now - job.lastProgressAt < 1200) return;
+  job.lastProgressAt = now;
   sendNotification('notifications/progress', {
     progressToken: token,
     progress: job.progress.length,
@@ -319,6 +340,12 @@ function emitProgress(job) {
       ? `DSH ${job.state === 'done' ? '完成' : '失败'}（${formatDuration((job.endedAt || now) - job.startedAt)}）`
       : `DSH 运行中 ${formatDuration(now - job.startedAt)}${job.lastNote ? ` · ${job.lastNote}` : ''}`,
   });
+}
+
+/** Finished jobs stay pollable for a while, then go. */
+function retire(job) {
+  progressTokens.delete(job.id);
+  if (job.state !== 'running') setTimeout(() => jobs.delete(job.id), 5 * 60_000).unref?.();
 }
 
 function waitFor(job, ms) {
@@ -406,6 +433,9 @@ function renderRunning(job) {
 
 function renderJob(job) {
   if (job.state === 'running') return renderRunning(job);
+  if (job.state === 'cancelled') {
+    return { text: `[DSH 作业已取消 · job=${job.id} · ${formatDuration(job.endedAt - job.startedAt)}]`, isError: false };
+  }
   if (job.state === 'failed') return { text: `[DSH 作业失败 · job=${job.id}]\n${job.error}`, isError: true };
   if (job.kind === 'parallel') return renderParallel(job.result);
   return renderSingle(job.result);
@@ -419,8 +449,22 @@ function textResult(text, isError) {
 
 function softWait(args) {
   const raw = args.soft_wait_ms;
+  if (raw === 0) return 0; // documented: 0 = wait until the job ends
   if (Number.isFinite(raw) && raw > 0) return raw;
   return readSettings().softWaitMs || DEFAULT_SOFT_WAIT_MS;
+}
+
+/** Wait up to `budget` while the caller's progress token is live, then render the job. */
+async function awaitJob(job, budget, ctx) {
+  if (ctx && ctx.progressToken !== undefined) progressTokens.set(job.id, ctx.progressToken);
+  try {
+    if (job.state === 'running') await waitFor(job, budget);
+  } finally {
+    progressTokens.delete(job.id);
+  }
+  const rendered = renderJob(job);
+  if (job.state !== 'running') retire(job);
+  return textResult(rendered.text, rendered.isError);
 }
 
 async function callTask(args, ctx) {
@@ -428,28 +472,40 @@ async function callTask(args, ctx) {
   if (String(input.task || '').trim().length === 0) return textResult('task 不能为空。', true);
 
   const defaults = readSettings();
-  const job = startJob({ kind: 'task', title: String(input.task || '').slice(0, 60), cwd: input.cwd }, (onEvent) =>
-    runTask({
-      task: input.task,
-      cwd: input.cwd,
-      writeScope: input.write_scope,
-      sessionId: input.session_id,
-      permissionMode: input.permission_mode || defaults.permissionMode,
-      approvalPolicy: input.approval_policy || defaults.approvalPolicy,
-      timeoutMs: input.timeout_ms || defaults.timeoutMs,
-      noWeb: Boolean(input.no_web),
-      onEvent,
-    }),
+  const job = startJob(
+    { kind: 'task', title: String(input.task || '').slice(0, 60), cwd: input.cwd },
+    (onEvent, control) =>
+      runTask({
+        task: input.task,
+        cwd: input.cwd,
+        writeScope: input.write_scope,
+        sessionId: input.session_id,
+        permissionMode: input.permission_mode || defaults.permissionMode,
+        approvalPolicy: input.approval_policy || defaults.approvalPolicy,
+        timeoutMs: input.timeout_ms || defaults.timeoutMs,
+        noWeb: Boolean(input.no_web),
+        onEvent,
+        onSpawn: control.track,
+      }),
   );
-  if (ctx && ctx.progressToken !== undefined) progressTokens.set(job.id, ctx.progressToken);
 
-  if (input.mode === 'async') {
-    const rendered = renderRunning(job);
-    return textResult(rendered.text, false);
-  }
+  if (input.mode === 'async') return textResult(renderRunning(job).text, false);
+  return awaitJob(job, softWait(input), ctx);
+}
 
-  const settled = await waitFor(job, softWait(input));
-  return settled === 'settled' ? finish(textResult, renderJob(job)) : finish(textResult, renderRunning(job));
+function cancelledResult(input, defaults) {
+  return {
+    ok: false,
+    durationMs: 0,
+    code: 'cancelled',
+    sessionId: '',
+    text: '',
+    reason: '作业已取消，未启动',
+    stderrTail: '',
+    permissionMode: input.permission_mode || defaults.permissionMode,
+    scope: '',
+    cwd: '',
+  };
 }
 
 async function callParallel(args, ctx) {
@@ -471,9 +527,10 @@ async function callParallel(args, ctx) {
       cwd: input.cwd,
       tasks: tasks.map((item) => (item && item.title) || '任务'),
     },
-    async (onEvent) => {
+    async (onEvent, control) => {
       const results = await mapLimit(tasks, limit, async (item) => {
         const task = item || {};
+        if (control.cancelled) return cancelledResult(input, defaults); // queued behind a cap
         // One run record per subagent, so the local UI can show them side by side.
         let taskRun = null;
         try {
@@ -493,18 +550,19 @@ async function callParallel(args, ctx) {
           permissionMode: task.permission_mode || input.permission_mode || defaults.permissionMode,
           approvalPolicy: task.approval_policy || input.approval_policy || defaults.approvalPolicy,
           timeoutMs: task.timeout_ms || input.timeout_ms || defaults.timeoutMs,
-        noWeb: Boolean(task.no_web || input.no_web),
+          noWeb: Boolean(task.no_web || input.no_web),
           onEvent: (event) => {
             recordEvent(taskRun, event);
             onEvent({ ...event, __task: task.title || '' });
           },
+          onSpawn: control.track,
         });
         runlog.finish(taskRun, {
           ok: result.ok,
           durationMs: result.durationMs,
           sessionId: result.sessionId,
           text: result.text,
-          reason: result.reason,
+          reason: control.cancelled ? '被调用方取消' : result.reason,
           usage: result.usage,
         });
         return result;
@@ -512,38 +570,30 @@ async function callParallel(args, ctx) {
       return { results, tasks, limit, wallMs: Date.now() - startedAt };
     },
   );
-  if (ctx && ctx.progressToken !== undefined) progressTokens.set(job.id, ctx.progressToken);
 
   if (input.mode === 'async') return textResult(renderRunning(job).text, false);
-
-  const settled = await waitFor(job, softWait(input));
-  return finish(textResult, settled === 'settled' ? renderJob(job) : renderRunning(job));
+  return awaitJob(job, softWait(input), ctx);
 }
 
-async function callJob(args) {
+async function callJob(args, ctx) {
   const input = args || {};
   const job = jobs.get(String(input.job_id || ''));
   if (!job) return textResult(`找不到作业：${input.job_id}。它可能已完成并被回收，或 id 写错了。`, true);
 
   if (input.action === 'cancel') {
-    killAll();
-    job.state = 'failed';
-    job.error = '被调用方取消';
+    if (job.state !== 'running') return textResult(`作业 ${job.id} 已经结束（${job.state}），不需要取消。`, false);
+    // Only this job's workers: other jobs keep running.
+    job.cancelled = true;
+    job.state = 'cancelled';
     job.endedAt = Date.now();
-    return textResult(`已取消作业 ${job.id}。`, false);
+    const count = job.children.size;
+    for (const child of job.children) killTree(child);
+    if (job.run) runlog.finish(job.run, { ok: false, durationMs: job.endedAt - job.startedAt, reason: '被调用方取消' });
+    retire(job);
+    return textResult(`已取消作业 ${job.id}（终止 ${count} 个子代理进程）。`, false);
   }
 
-  if (job.state === 'running') await waitFor(job, input.wait_ms);
-  const rendered = renderJob(job);
-  if (job.state !== 'running') {
-    setTimeout(() => jobs.delete(job.id), 5 * 60_000).unref?.();
-    progressTokens.delete(job.id);
-  }
-  return textResult(rendered.text, rendered.isError);
-}
-
-function finish(textResultFn, rendered) {
-  return textResultFn(rendered.text, rendered.isError);
+  return awaitJob(job, input.wait_ms, ctx);
 }
 
 // ---------------------------------------------------------------- protocol
@@ -593,7 +643,7 @@ function handle(message) {
       const ctx = { progressToken: token };
 
       if (name === 'dsh_job') {
-        callJob(args).then(
+        callJob(args, ctx).then(
           (result) => reply(id, result),
           (cause) => reply(id, textResult(`dsh_job 出错：${cause && cause.message ? cause.message : cause}`, true)),
         );

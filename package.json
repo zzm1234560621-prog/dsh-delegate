@@ -21,6 +21,7 @@
     "bin",
     "lib",
     "assets",
+    "install.cmd",
     "install.ps1",
     "install.sh",
     "README.md",

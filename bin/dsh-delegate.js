@@ -16,13 +16,35 @@ function parseArgs(argv) {
   const args = { _: [] };
   for (const token of argv) {
     if (token.startsWith('--')) {
-      const [key, value] = token.slice(2).split('=');
-      args[key] = value === undefined ? true : value;
+      const body = token.slice(2);
+      const eq = body.indexOf('=');
+      if (eq === -1) args[body] = true;
+      else args[body.slice(0, eq)] = body.slice(eq + 1);
     } else {
       args._.push(token);
     }
   }
   return args;
+}
+
+const KNOWN_FLAGS = {
+  install: ['dry-run', 'targets', 'no-clients', 'autostart', 'port', 'copy-credentials', 'dsh-app'],
+  uninstall: ['remove-runtime', 'keep-clients', 'dsh-app'],
+};
+
+/** Commands that change the machine refuse unknown input: `--dryrun` must not run for real. */
+function assertKnownFlags(command, args) {
+  const allowed = KNOWN_FLAGS[command];
+  if (!allowed) return;
+  const unknown = Object.keys(args)
+    .filter((key) => key !== '_' && !allowed.includes(key))
+    .map((key) => `--${key}`);
+  const stray = args._.slice(1);
+  if (unknown.length || stray.length) {
+    throw new Error(
+      `${command} 不认识这些参数：${[...unknown, ...stray].join(' ')}\n  可用：${allowed.map((key) => `--${key}`).join(' ')}`,
+    );
+  }
 }
 
 function log(line = '') {
@@ -132,8 +154,6 @@ async function commandInstall(args) {
 
   if (!dryRun) copyRuntime(bridgeDir());
 
-
-
   const results = [];
 
   if (!dryRun) {
@@ -174,7 +194,11 @@ async function commandInstall(args) {
       log('');
       log('⚠ 没检测到凭据：headless 只读 $DSH_HOME/.env 或启动环境，不读 GUI 保存的 key。');
       log('  第一次派活会报 MISSING_CREDENTIAL。补一个即可：');
-      log(`    "DEEPSEEK_API_KEY=sk-..." | Add-Content "${envFile}"`);
+      log(
+        process.platform === 'win32'
+          ? `    "DEEPSEEK_API_KEY=sk-..." | Add-Content "${envFile}"`
+          : `    echo 'DEEPSEEK_API_KEY=sk-...' >> "${envFile}"`,
+      );
       log('  或重跑本命令时加 --copy-credentials（从 DSH 已有凭据里搬）。');
     }
   }
@@ -201,16 +225,33 @@ function copyCredentials(dshHomeDir) {
 }
 
 function commandUninstall(args) {
+  // Load everything up front: --remove-runtime may delete the very files this runs from.
+  const autostart = require('../lib/autostart');
+  const daemon = require('../lib/daemon').status();
   const removed = [];
   removed.push({ what: 'shim', ...agents.removeShim() });
   for (const item of agents.removeSkill(dsh.dshHome())) removed.push({ what: 'skill', ...item });
   for (const item of agents.removeInstructions(dsh.dshHome())) removed.push({ what: 'instructions', ...item });
-  log('已移除 agent 侧文件（客户端配置里的 dsh 条目需要手动删，或按 README 的说明操作）：');
-  for (const item of removed) log(`  ${item.what.padEnd(14)} ${item.status.padEnd(10)} ${item.file}`);
+  if (!args['keep-clients']) {
+    // Only entries that start a dsh-delegate mcp.js; someone else's "dsh" server stays.
+    for (const item of targets.removeAll()) removed.push({ what: `client:${item.target}`, ...item });
+  }
+  if (autostart.status().enabled) {
+    const after = autostart.disable();
+    removed.push({ what: 'autostart', status: after.enabled ? 'FAILED' : 'removed', file: after.target });
+  }
+
+  log('卸载结果：');
+  for (const item of removed) {
+    log(`  ${item.what.padEnd(22)} ${String(item.status).padEnd(10)} ${item.file || ''}${item.detail ? `（${item.detail}）` : ''}`);
+  }
+  if (args['keep-clients']) log('  （--keep-clients：客户端配置里的 dsh 条目保留）');
   if (args['remove-runtime']) {
     fs.rmSync(bridgeDir(), { recursive: true, force: true });
     log(`已删除运行时目录 ${bridgeDir()}`);
   }
+  if (daemon.running) log(`提示：本地服务仍在运行（pid ${daemon.pid}），结束该进程或重启后消失。`);
+  log('重启 Claude 桌面版 / 重新打开 Claude Code 后，dsh 工具会从列表里消失。');
 }
 
 function commandDoctor(args) {
@@ -263,19 +304,28 @@ function commandDoctor(args) {
   if (failed > 0) process.exitCode = 1;
 }
 
+/** Copy-paste snippets for clients the installer does not wire itself. */
 function commandPrintConfig() {
   const ctx = runtimeContext();
-  log(
-    JSON.stringify(
-      {
-        claude_desktop: { mcpServers: { [targets.SERVER_NAME]: { command: ctx.nodePath, args: [ctx.mcpPath], env: { DSH_HOME: ctx.dshHome } } } },
-        codex_toml: `[mcp_servers.${targets.SERVER_NAME}]\ncommand = "${ctx.nodePath}"\nargs = ["${ctx.mcpPath}"]\nenv = { DSH_HOME = "${ctx.dshHome}" }`,
-        launch: dsh.installCommand(dsh.discover()),
-      },
-      null,
-      2,
-    ),
-  );
+  const q = (value) => (/\s/.test(value) ? `"${value}"` : value);
+  const entry = { command: ctx.nodePath, args: [ctx.mcpPath], env: { DSH_HOME: ctx.dshHome } };
+  let launch;
+  try {
+    launch = dsh.installCommand(dsh.discover());
+  } catch (cause) {
+    launch = `（没找到 DSH：${cause.message.split('\n')[0]}）`;
+  }
+  log('# Claude 桌面版，以及其他用 mcpServers JSON 的 MCP 客户端');
+  log(JSON.stringify({ mcpServers: { [targets.SERVER_NAME]: entry } }, null, 2));
+  log('');
+  log('# Codex：~/.codex/config.toml');
+  log(targets.codexBlock(ctx).join('\n'));
+  log('');
+  log('# Claude Code');
+  log(`claude mcp add --scope user ${targets.SERVER_NAME} -e DSH_HOME=${q(ctx.dshHome)} -- ${q(ctx.nodePath)} ${q(ctx.mcpPath)}`);
+  log('');
+  log('# DSH headless 启动命令');
+  log(launch);
 }
 
 function openBrowser(url) {
@@ -343,7 +393,7 @@ function commandStatus() {
   log(`登录自启动：${autostart.enabled ? '已开启' : '未开启'}（${autostart.mechanism}）`);
 }
 
-function main() {
+async function main() {
   const args = parseArgs(process.argv.slice(2));
   const command = args._[0] || 'help';
 
@@ -357,6 +407,7 @@ function main() {
     require('../lib/mcp').serve();
     return;
   }
+  assertKnownFlags(command, args);
   if (command === 'install') return commandInstall(args);
   if (command === 'uninstall') return commandUninstall(args);
   if (command === 'doctor') return commandDoctor(args);
@@ -371,12 +422,12 @@ function main() {
 用法：
   dsh-delegate install [--targets=claude-desktop,claude-code,codex] [--dry-run] [--copy-credentials] [--autostart]
   dsh-delegate daemon [--port=7788] [--no-ui] [--open]   # 常驻服务（可选是否带看板）
-  dsh-delegate ui [--port=7788] [--open]                 # daemon + 看板 + 打开浏览器
+  dsh-delegate ui [--port=7788] [--open]                 # daemon + 看板（--open 顺便打开浏览器）
   dsh-delegate autostart on|off|status [--port=7788]     # 登录自启动（默认仅 API）
   dsh-delegate status
   dsh-delegate doctor [--run]
   dsh-delegate print-config
-  dsh-delegate uninstall [--remove-runtime]
+  dsh-delegate uninstall [--remove-runtime] [--keep-clients]
   dsh-delegate serve                                     # MCP stdio server（客户端拉起）
 
 全局：

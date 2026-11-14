@@ -317,6 +317,8 @@ function writeEnvKey(name, value) {
   }
   const text = value === undefined || value === null ? '' : String(value);
   if (text.trim().length === 0) throw new Error('值不能为空');
+  // A newline would smuggle extra lines (including reserved DSH_ ones) into .env.
+  if (/[\r\n\0]/.test(text)) throw new Error('值不能包含换行');
 
   const file = envFile();
   const lines = readText(file).split(/\r?\n/);
@@ -448,13 +450,16 @@ module.exports = {
 async function installProvider(id) {
   const provider = PROVIDERS.find((item) => item.id === id);
   if (!provider || !provider.plugin) throw new Error(`未知供应商：${id}`);
-  const { execFileSync } = require('node:child_process');
-  const { which } = require('./dsh');
-  const shim = which('dsh');
-  if (!shim) throw new Error('找不到 dsh 命令，无法安装供应商插件');
-  const output = execFileSync(shim, ['plugin', '--profile', 'headless', 'add', provider.plugin], {
-    encoding: 'utf8',
-    shell: process.platform === 'win32',
+  // Go through discover(), not `which('dsh')`: desktop-only installs have no dsh
+  // on PATH other than our own launcher, which which() deliberately skips.
+  const { discover, runDshSync } = require('./dsh');
+  const result = runDshSync(discover(), ['plugin', '--profile', 'headless', 'add', provider.plugin], {
+    timeout: 10 * 60_000,
   });
-  return { ok: true, output: output.slice(-2000) };
+  if (result.error) throw new Error(`安装失败：${result.error.message}`);
+  if (result.status !== 0) {
+    const tail = String(result.stderr || result.stdout || '').trim().slice(-800);
+    throw new Error(`安装失败（exit ${result.status}）：${tail}`);
+  }
+  return { ok: true, output: String(result.stdout || '').slice(-2000) };
 }
