@@ -493,6 +493,9 @@ async function quotaSuite() {
   const urgent = contextOf(run(['hook', 'prompt'], '{}'));
   check('用到 95%：提醒升级为「全派」', /全部派给 DSH/.test(urgent), urgent.slice(0, 80));
 
+  const bom = run(['statusline'], `\uFEFF${statusInput(95)}`);
+  check('statusline 能处理带 BOM 的 stdin', bom.status === 0 && /\[Opus\]/.test(bom.stdout) && /5h 95%/.test(bom.stdout), bom.stdout.trim());
+
   check('statusline 收到坏输入照常输出', /DSH/.test(run(['statusline'], 'not json').stdout));
   check('hook 收到坏输入照常退出', run(['hook', 'prompt'], 'not json').status === 0);
   const listing = run(['quota'], '');

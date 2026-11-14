@@ -350,7 +350,8 @@ function readStdin(timeoutMs) {
     let data = '';
     const done = () => {
       clearTimeout(timer);
-      resolve(data);
+      // A shell that pipes a string (PowerShell, some harnesses) can prefix a UTF-8 BOM.
+      resolve(data.charCodeAt(0) === 0xfeff ? data.slice(1) : data);
     };
     const timer = setTimeout(done, timeoutMs);
     process.stdin.setEncoding('utf8');
