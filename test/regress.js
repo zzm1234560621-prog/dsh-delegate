@@ -294,6 +294,11 @@ async function httpSuite() {
   const dshUi = 'http://127.0.0.1:63813';
   const panel = await request(base, 'GET', '/api/runs', { origin: dshUi });
   check('本机页面（DSH web UI）可读，CORS 回显该来源', panel.status === 200 && panel.headers['access-control-allow-origin'] === dshUi, `${panel.status} ${panel.headers['access-control-allow-origin']}`);
+  // The DSH desktop app's panel really sends this origin (seen on a live install).
+  const desktopPanel = await request(base, 'GET', '/api/service', { origin: 'dsh-app://app' });
+  check('DSH 桌面版面板（dsh-app://app）可读', desktopPanel.status === 200 && desktopPanel.headers['access-control-allow-origin'] === 'dsh-app://app', `${desktopPanel.status} ${desktopPanel.headers['access-control-allow-origin']}`);
+  const lookalike = await request(base, 'GET', '/api/state', { origin: 'https://dsh-app.evil.example' });
+  check('长得像的外站来源仍 403', lookalike.status === 403, `${lookalike.status}`);
   const local = await request(base, 'GET', '/api/state');
   check('无 Origin（本机脚本）可读，且不带 CORS 头', local.status === 200 && !local.headers['access-control-allow-origin']);
   const plain = await request(base, 'POST', '/api/settings', { 'content-type': 'text/plain' }, '{"softWaitMs":1000}');
@@ -371,6 +376,53 @@ async function mcpSuite() {
   check('dsh_job 等待期间用它自己的 token 发进度', during.length > 0 && during.every((n) => n.at <= waited.at), `${during.length} 条`);
 
   child.kill();
+}
+
+// ---------------------------------------------------------------- line endings
+
+console.log('\n== 分工说明：换行符不同不算改动 ==');
+{
+  const sb = sandbox('eol');
+  const agents = require(path.join(ROOT, 'lib', 'agents.js'));
+  const file = path.join(sb.user, 'CLAUDE.md');
+  fs.writeFileSync(file, '# mine\r\nkeep me\r\n');
+  const fragment = 'line one\nprice is $& and $1\nline three\n';
+  const first = agents.upsertBlock(file, fragment);
+  const second = agents.upsertBlock(file, fragment.replace(/\n/g, '\r\n')); // another checkout's EOL
+  const text = fs.readFileSync(file, 'utf8');
+  check('换一种换行符再装一次：unchanged，不重写用户文件', first.status === 'written' && second.status === 'unchanged', `${first.status} → ${second.status}`);
+  check('沿用文件原有的 CRLF，不产生混合换行', !/[^\r]\n/.test(text));
+  check('片段里的 $ 原样写入（不被当成替换模式）', text.includes('price is $& and $1'));
+  check('用户原有内容保留', text.startsWith('# mine\r\nkeep me'));
+}
+
+console.log('\n== 发布包：换行符由 .gitattributes 固定 ==');
+{
+  const inGit = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: ROOT, encoding: 'utf8' });
+  if (inGit.status !== 0) {
+    console.log('  （不在 git 仓库里，跳过）');
+  } else {
+    // Worst case: a Windows checkout with core.autocrlf=true.
+    const tar = spawnSync(
+      'git',
+      ['-c', 'core.autocrlf=true', 'archive', '--worktree-attributes', '--format=tar', 'HEAD', '--', 'install.sh', 'install.cmd'],
+      { cwd: ROOT, maxBuffer: 16 * 1024 * 1024 },
+    );
+    const files = {};
+    const buffer = tar.stdout || Buffer.alloc(0);
+    for (let at = 0; at + 512 <= buffer.length; ) {
+      const header = buffer.subarray(at, at + 512);
+      const name = header.subarray(0, 100).toString('utf8').split('\0')[0];
+      if (!name) break;
+      const size = parseInt(header.subarray(124, 136).toString('utf8').split('\0')[0].trim() || '0', 8);
+      files[name] = buffer.subarray(at + 512, at + 512 + size);
+      at += 512 + Math.ceil(size / 512) * 512;
+    }
+    const sh = files['install.sh'];
+    const cmd = files['install.cmd'];
+    check('发布包里 install.sh 是 LF（macOS / Linux 能跑）', Boolean(sh) && !sh.includes(13), sh ? 'contains CR' : 'install.sh 不在包里');
+    check('发布包里 install.cmd 是 CRLF', Boolean(cmd) && cmd.includes('\r\n'));
+  }
 }
 
 // ---------------------------------------------------------------- bundle

@@ -22,15 +22,24 @@ function readAsset(name) {
   return fs.readFileSync(path.join(assetsDir(), name), 'utf8');
 }
 
-/** Replace the marked block, or append it when missing. */
+/**
+ * Replace the marked block, or append it when missing. The block is written in the
+ * file's own line-ending style and compared ignoring line endings, so installing
+ * from checkouts with different EOL settings never rewrites the user's file.
+ */
 function upsertBlock(file, fragment) {
-  const block = `${START}\n${fragment.trim()}\n${END}\n`;
   const existing = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
-  const pattern = new RegExp(`${START}[\\s\\S]*?${END}\\n?`);
+  const eol = existing.includes('\r\n') ? '\r\n' : '\n';
+  const body = fragment.replace(/\r\n/g, '\n').trim().split('\n').join(eol);
+  const block = `${START}${eol}${body}${eol}${END}${eol}`;
+  const pattern = new RegExp(`${START}[\\s\\S]*?${END}(\\r?\\n)?`);
+  // A replacer function: the fragment contains `$` (PowerShell), which a
+  // replacement string would treat as a pattern.
   const next = pattern.test(existing)
-    ? existing.replace(pattern, block)
-    : `${existing.replace(/\s*$/, existing.trim().length ? '\n\n' : '')}${block}`;
-  if (next === existing) return { file, status: 'unchanged' };
+    ? existing.replace(pattern, () => block)
+    : `${existing.replace(/\s*$/, existing.trim().length ? `${eol}${eol}` : '')}${block}`;
+  const same = (a, b) => a.replace(/\r\n/g, '\n') === b.replace(/\r\n/g, '\n');
+  if (same(next, existing)) return { file, status: 'unchanged' };
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, next);
   return { file, status: 'written' };
