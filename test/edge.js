@@ -144,7 +144,8 @@ console.log('\n== MCP 协议边界 ==');
 const SERVER = path.join(ROOT, 'lib', 'mcp.js');
 
 async function withServer(fn) {
-  const child = spawn(process.execPath, [SERVER], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const sb = sandbox('protocol');
+  const child = spawn(process.execPath, [SERVER], { env: envFor(sb), stdio: ['pipe', 'pipe', 'pipe'] });
   let buffer = '';
   const pending = new Map();
   child.stdout.on('data', (chunk) => {
