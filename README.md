@@ -157,7 +157,8 @@ headless 读不到 DSH 桌面版里保存的 key，装好后要**在看板里配
 | `dsh_parallel` | 一次派多件互不依赖的任务 | `tasks[]`（每项可带 `title`、`write_scope`、`cwd`）、`max_concurrency` |
 | `dsh_job` | 等待或取消长任务 | `job_id`、`wait_ms`、`action: "cancel"` |
 
-- 一次调用最多等 45 秒（用 `soft_wait_ms` 调整，`0` 表示一直等）。没跑完会返回 `job=…`，**这不是失败**，用 `dsh_job` 接着等。
+- 一次调用最多等 45 秒（用 `soft_wait_ms` 调整，上限 50 秒；`0` 表示一直等，但可能被宿主的单次调用超时打断）。没跑完会返回 `job=…`，**这不是失败**，用 `dsh_job` 接着等。
+- 宿主重连、dsh-delegate 被重启之后，`dsh_job` 仍然能查原来的 job id：已完成的结果从 `~/.dsh/delegate-runs` 的运行记录里找回；服务退出时还没跑完的作业会被标成「已中断」。
 - 任务本身默认不设超时，显式传了 `timeout_ms` 才计时。
 - 子代理能读整个仓库，只能写工作目录或 `write_scope`；默认 `workspace-write` 沙箱，无人值守（`--approval-policy never`）。
 - `dsh_job` 的 `cancel` 只终止这个作业自己的子代理，连同它们启动的子进程；别的作业不受影响。

@@ -321,10 +321,10 @@ async function httpSuite() {
 
 // ---------------------------------------------------------------- MCP jobs
 
-async function mcpSuite() {
-  console.log('\n== MCP：取消只影响自己的作业；进度通知不越过响应 ==');
-  const sb = sandbox('mcp');
+/** lib/mcp.js with fake DSH in `sb`, plus a minimal JSON-RPC client for it. */
+function mcpServer(sb) {
   const child = spawn(NODE, [path.join(ROOT, 'lib', 'mcp.js')], { env: envFor(sb, FAKE_DESKTOP) });
+  const exited = new Promise((resolve) => child.once('exit', resolve));
   let buffer = '';
   const pending = new Map();
   const notes = [];
@@ -353,11 +353,21 @@ async function mcpSuite() {
       pending.set(id, (message) => resolve({ ...message, at: Date.now() }));
       child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
     });
-  const text = (reply) => reply.result.content[0].text;
-  const jobOf = (reply) => (text(reply).match(/job=(dsh-[\w-]+)/) || [])[1];
   const call = (name, args, meta) => send('tools/call', { name, arguments: args, ...(meta ? { _meta: meta } : {}) });
+  const init = () => send('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'regress', version: '1' } });
+  return { child, exited, notes, send, call, init };
+}
 
-  const init = await send('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'regress', version: '1' } });
+const replyText = (reply) => reply.result.content[0].text;
+const jobOf = (reply) => (replyText(reply).match(/job=(dsh-[\w-]+)/) || [])[1];
+
+async function mcpSuite() {
+  console.log('\n== MCP：取消只影响自己的作业；进度通知不越过响应 ==');
+  const sb = sandbox('mcp');
+  const { child, notes, call, init: initialize } = mcpServer(sb);
+  const text = replyText;
+
+  const init = await initialize();
   const shipped = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
   check('serverInfo 版本与 package.json 一致', init.result && init.result.serverInfo.version === shipped, `${init.result && init.result.serverInfo.version} vs ${shipped}`);
   const echoed = await call('dsh_task', { task: 'ECHO_TASK 看看收到什么', cwd: sb.dir });
@@ -388,6 +398,132 @@ async function mcpSuite() {
   check('dsh_job 等待期间用它自己的 token 发进度', during.length > 0 && during.every((n) => n.at <= waited.at), `${during.length} 条`);
 
   child.kill();
+}
+
+async function jobRecoverySuite() {
+  console.log('\n== MCP：服务重启后 dsh_job 照样能查；退出时标记中断；单次等待封顶 ==');
+  const sb = sandbox('recover');
+  const runsDir = path.join(sb.home, 'delegate-runs');
+  const recordsOf = (jobId) =>
+    (fs.existsSync(runsDir) ? fs.readdirSync(runsDir) : [])
+      .filter((name) => name.endsWith('.json'))
+      .map((name) => JSON.parse(fs.readFileSync(path.join(runsDir, name), 'utf8')))
+      .filter((meta) => meta.jobId === jobId);
+  const until = async (predicate, ms = 15_000) => {
+    const deadline = Date.now() + ms;
+    while (!predicate() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+    return predicate();
+  };
+  const firstLine = (reply) => replyText(reply).split('\n')[0];
+
+  // Finished jobs: the host reconnects (closes stdin), a new server process answers.
+  const first = mcpServer(sb);
+  await first.init();
+  const single = jobOf(await first.call('dsh_task', { task: 'SLEEP=200 single', cwd: sb.dir, mode: 'async' }));
+  const batch = jobOf(
+    await first.call('dsh_parallel', { tasks: [{ title: '甲', task: 'SLEEP=200 one' }, { title: '乙', task: 'two' }], cwd: sb.dir, mode: 'async' }),
+  );
+  const settled = (jobId, count) => {
+    const records = recordsOf(jobId);
+    return records.length === count && records.every((meta) => meta.state === 'done');
+  };
+  await until(() => settled(single, 1) && settled(batch, 2));
+  first.child.stdin.end();
+  await first.exited;
+
+  const second = mcpServer(sb);
+  await second.init();
+  const back = await second.call('dsh_job', { job_id: single });
+  check(
+    '重启后 dsh_job 找回已完成作业的结果',
+    /DSH ok/.test(replyText(back)) && /fake-dsh ok/.test(replyText(back)) && /运行记录/.test(replyText(back)),
+    firstLine(back),
+  );
+  const backBatch = await second.call('dsh_job', { job_id: batch });
+  const batchText = replyText(backBatch);
+  check(
+    '重启后并行作业逐个找回（标题 + 最终文本）',
+    /2\/2 成功/.test(batchText) && /甲/.test(batchText) && /乙/.test(batchText) && (batchText.match(/fake-dsh ok/g) || []).length === 2,
+    firstLine(backBatch),
+  );
+
+  // Still running when the server goes away: records say so before the workers die.
+  const long = jobOf(await second.call('dsh_task', { task: 'SLEEP=30000 long', cwd: sb.dir, mode: 'async' }));
+  const capped = jobOf(
+    await second.call('dsh_parallel', {
+      tasks: [{ title: '慢', task: 'SLEEP=30000 slow' }, { title: '排队', task: 'queued' }],
+      cwd: sb.dir,
+      max_concurrency: 1,
+      mode: 'async',
+    }),
+  );
+  // Wait until DSH has reported its session, so the record can name it.
+  await until(() => recordsOf(long).some((meta) => meta.sessionId) && recordsOf(capped).some((meta) => meta.sessionId));
+  second.child.stdin.end(); // what a host does when it reconnects
+  await second.exited;
+  const marked = [...recordsOf(long), ...recordsOf(capped)];
+  check(
+    '退出时把还在跑的 run 记录标成 interrupted 并写明原因',
+    marked.length === 2 && marked.every((meta) => meta.state === 'interrupted' && /宿主断开/.test(meta.reason || '')),
+    JSON.stringify(marked.map((meta) => [meta.state, meta.reason])),
+  );
+  check(
+    '中断的记录留着子代理会话 id（可续接）',
+    marked.length === 2 && marked.every((meta) => /^session-fake-/.test(meta.sessionId || '')),
+  );
+
+  const third = mcpServer(sb);
+  await third.init();
+  const cut = await third.call('dsh_job', { job_id: long });
+  check('重启后查被打断的作业：报「已中断」', /已中断/.test(replyText(cut)) && cut.result.isError === true, firstLine(cut));
+  const cutBatch = await third.call('dsh_job', { job_id: capped });
+  check(
+    '并行作业：跑到一半的报已中断，还在排队的报未启动',
+    /1 已中断/.test(replyText(cutBatch)) && /1 未启动/.test(replyText(cutBatch)),
+    firstLine(cutBatch),
+  );
+
+  // Killed outright, the server can't mark anything: "running" plus a dead pid.
+  const hard = jobOf(await third.call('dsh_task', { task: 'SLEEP=3000 hard', cwd: sb.dir, mode: 'async' }));
+  await until(() => recordsOf(hard).length === 1);
+  third.child.kill('SIGKILL');
+  await third.exited;
+  check('强杀后记录仍停在 running', (recordsOf(hard)[0] || {}).state === 'running');
+  const fourth = mcpServer(sb);
+  await fourth.init();
+  const lost = await fourth.call('dsh_job', { job_id: hard });
+  check('记录是 running 但进程已不在：报「已中断」', /已中断/.test(replyText(lost)) && /已经不在/.test(replyText(lost)), firstLine(lost));
+
+  // Still running under another live server (a second host, or an old server left alive).
+  const elsewhere = jobOf(await fourth.call('dsh_task', { task: 'SLEEP=3000 elsewhere', cwd: sb.dir, mode: 'async' }));
+  await until(() => recordsOf(elsewhere).length === 1);
+  const fifth = mcpServer(sb);
+  await fifth.init();
+  const peek = await fifth.call('dsh_job', { job_id: elsewhere, wait_ms: 300 });
+  check('另一个活着的服务进程在跑的作业：报运行中', /运行中/.test(replyText(peek)) && /另一个 MCP 服务进程/.test(replyText(peek)), firstLine(peek));
+  const followed = await fifth.call('dsh_job', { job_id: elsewhere, wait_ms: 15_000 });
+  check('跟着运行记录等到它跑完，拿到结果', /DSH ok/.test(replyText(followed)) && /fake-dsh ok/.test(replyText(followed)), firstLine(followed));
+  fifth.child.kill();
+
+  // One call never waits past 50 s, whatever it asks for.
+  const caps = nodeEval(
+    sb,
+    `const m = require(${req('mcp.js')});` +
+      'console.log(JSON.stringify([m.jobWait({ wait_ms: 60000 }), m.jobWait({ wait_ms: 0 }), m.jobWait({ wait_ms: 1500 }),' +
+      ' m.softWait({ soft_wait_ms: 120000 }), m.softWait({ soft_wait_ms: 0 }) === Infinity]))',
+  );
+  const [jobLong, jobZero, jobShort, softLong, softZero] = JSON.parse(caps.stdout.trim() || '[]');
+  check('dsh_job 的 wait_ms 过大（60000）或为 0 都封顶到 50000', jobLong === 50_000 && jobZero === 50_000 && jobShort === 1500, caps.stdout.trim() || caps.stderr);
+  check('soft_wait_ms 过大封顶到 50000，0 仍是一直等', softLong === 50_000 && softZero === true, caps.stdout.trim());
+  const listed = await fourth.send('tools/list', {});
+  const tools = listed.result.tools;
+  const prop = (name, key) => tools.find((tool) => tool.name === name).inputSchema.properties[key].description;
+  check(
+    '工具说明写明上限与宿主超时，不再说「不设上限」',
+    /50000/.test(prop('dsh_job', 'wait_ms')) && /宿主/.test(prop('dsh_task', 'soft_wait_ms')) && !/不设上限/.test(JSON.stringify(tools)),
+  );
+
+  fourth.child.kill();
 }
 
 // ---------------------------------------------------------------- line endings
@@ -590,6 +726,7 @@ console.log('\n== 插件包里的服务与 lib/ 同步 ==');
 (async () => {
   await httpSuite();
   await mcpSuite();
+  await jobRecoverySuite();
   await quotaSuite();
   for (const dir of sandboxes) {
     try {
