@@ -453,7 +453,7 @@ function relTime(ts) {
 }
 
 function statePill(stateName) {
-  const map = { running: ['ok', '运行中'], done: ['ok', '完成'], failed: ['err', '失败'], lost: ['warn', '进程没了'] };
+  const map = { running: ['ok', '运行中'], done: ['ok', '完成'], failed: ['err', '失败'], interrupted: ['warn', '已中断'], lost: ['warn', '进程没了'] };
   const [kind, text] = map[stateName] || ['warn', stateName];
   const span = document.createElement('span');
   span.className = 'pill ' + kind;
@@ -654,7 +654,7 @@ let modalTimer = null;
 let modalSignature = '';
 let modalRendered = 0;
 
-const RUN_STATE_LABELS = { running: '运行中', done: '完成', failed: '失败', lost: '进程没了' };
+const RUN_STATE_LABELS = { running: '运行中', done: '完成', failed: '失败', interrupted: '已中断', lost: '进程没了' };
 
 function eventToBlock(event) {
   if (event.kind === 'turn') {

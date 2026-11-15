@@ -159,7 +159,8 @@ Edited 14 files; eslint passes.
 | `dsh_parallel` | Delegate several independent tasks at once | `tasks[]` (each may have `title`, `write_scope`, `cwd`), `max_concurrency` |
 | `dsh_job` | Wait for or cancel a long job | `job_id`, `wait_ms`, `action: "cancel"` |
 
-- A call waits up to 45 s (`soft_wait_ms` changes that; `0` waits until done). If the task isn't finished it returns `job=…`. **That is not a failure**: keep waiting with `dsh_job`.
+- A call waits up to 45 s (`soft_wait_ms` changes that, up to 50 s; `0` waits until done, but the host's per-call timeout can cut it off). If the task isn't finished it returns `job=…`. **That is not a failure**: keep waiting with `dsh_job`.
+- If the host reconnects and dsh-delegate restarts, `dsh_job` still answers for the old job id: finished results come back from the run records in `~/.dsh/delegate-runs`, and jobs still running when the server exited are reported as interrupted.
 - Tasks have no timeout by default; only an explicit `timeout_ms` starts a clock.
 - Subagents can read the whole repo but write only their working directory or `write_scope`. The defaults are the `workspace-write` sandbox and unattended runs (`--approval-policy never`).
 - `dsh_job` with `cancel` stops only that job's subagents and the processes they started; other jobs keep running.
