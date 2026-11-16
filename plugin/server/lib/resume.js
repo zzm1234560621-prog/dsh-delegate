@@ -57,12 +57,30 @@ function skipSet() {
   }
 }
 
+/** 运行目录是否落在允许续接的根目录下（不区分大小写，Windows 友好）。 */
+function underRoot(cwd, roots) {
+  if (!roots || !roots.length) return true;
+  const value = String(cwd || '').toLowerCase().replace(/\\/g, '/');
+  return roots.some((root) => {
+    const prefix = String(root).toLowerCase().replace(/\\/g, '/').replace(/\/$/, '');
+    return value === prefix || value.startsWith(prefix + '/');
+  });
+}
+
 function pickCandidates(options = {}) {
   const limit = Number.isFinite(options.limit) ? options.limit : 8;
   const force = options.force === true;
   const runs = runlog.listRuns(500);
   const resumed = alreadyResumed();
   const skip = skipSet();
+  const roots = (() => {
+    try {
+      const list = require('./config').readSettings().resumeRoots;
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return [];
+    }
+  })();
   const byId = new Map(runs.map((run) => [run.id, run]));
 
   const wanted = options.ids && options.ids.length ? options.ids.map((id) => byId.get(id)).filter(Boolean) : runs;
@@ -76,6 +94,10 @@ function pickCandidates(options = {}) {
     }
     if (!retryable(run)) {
       skipped.push({ id: run.id, why: run.state !== 'failed' ? `状态是 ${run.state}` : run.sessionId ? '错误不可重试' : '没有 session id' });
+      continue;
+    }
+    if (!underRoot(run.cwd, roots)) {
+      skipped.push({ id: run.id, why: '不在 resumeRoots 允许的目录里' });
       continue;
     }
     if (skip.has(run.sessionId)) {
