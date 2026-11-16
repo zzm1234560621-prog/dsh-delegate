@@ -483,10 +483,47 @@ async function commandDaemon(args) {
     if (withUi && args.open) openBrowser(running.url);
     return;
   }
-  const { url } = await daemon.run({ port, ui: withUi });
-  if (withUi && args.open) openBrowser(url);
+  let started;
+  try {
+    started = await daemon.run({ port, ui: withUi });
+  } catch (cause) {
+    if (cause.code !== 'EADDRINUSE') throw cause;
+    // Taken by another copy of this service (state file lost, or the watchdog racing a
+    // start): fine, leave it. Taken by something else: say so instead of drifting to
+    // another port the DSH panel would never find.
+    const url = `http://127.0.0.1:${port}`;
+    if (await isOurService(port)) {
+      log(`服务已在运行: ${url}（端口已被现有实例占用）`);
+      if (withUi && args.open) openBrowser(url);
+      return;
+    }
+    throw new Error(`端口 ${port} 被别的程序占用；用 --port= 换一个，或在看板里改端口`);
+  }
+  if (withUi && args.open) openBrowser(started.url);
   // keep the process alive: daemon.run returns after the server starts
   await new Promise(() => {});
+}
+
+/** Does a dsh-delegate service answer on this port? */
+function isOurService(port) {
+  return new Promise((resolve) => {
+    const request = require('node:http').get({ host: '127.0.0.1', port, path: '/api/service', timeout: 2000 }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        body += chunk;
+      });
+      res.on('end', () => {
+        try {
+          resolve(res.statusCode === 200 && 'running' in JSON.parse(body));
+        } catch {
+          resolve(false);
+        }
+      });
+    });
+    request.on('timeout', () => request.destroy());
+    request.on('error', () => resolve(false));
+  });
 }
 
 function commandAutostart(args) {

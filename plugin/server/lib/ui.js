@@ -348,58 +348,33 @@ async function handleApi(req, res, pathname) {
   return json(res, 404, { error: 'not found' });
 }
 
+/**
+ * @param {{port?:number, serveUi?:boolean, strictPort?:boolean}} options
+ *   strictPort: fail on EADDRINUSE instead of moving to the next port. The service
+ *   needs its configured port: the DSH panel and the dashboard link look there.
+ */
 function start(options = {}) {
   const base = Number.isFinite(options.port) && options.port > 0 ? options.port : 7788;
   const serveUi = options.serveUi !== false;
   const server = http.createServer((req, res) => {
-    const origin = req.headers.origin;
-    if (!hostAllowed(req.headers.host)) {
-      res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' }).end('forbidden: host');
-      return;
-    }
-    if (!originAllowed(origin)) {
-      res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' }).end('forbidden: origin');
-      return;
-    }
-    res.corsOrigin = origin || null;
-
-    const url = new URL(req.url, 'http://127.0.0.1');
-    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-      if (!serveUi) {
-        json(res, 200, {
-          name: 'dsh-delegate',
-          mode: 'api-only',
-          ui: false,
-          endpoints: ['/api/state', '/api/model', '/api/settings', '/api/env', '/api/runs', '/api/quota', '/api/test', '/api/clients/install'],
-          hint: '这是仅 API 模式；用 dsh-delegate daemon（不带 --no-ui）启动看板。',
-        });
-        return;
+    try {
+      handleRequest(req, res, serveUi);
+    } catch (cause) {
+      // A malformed request (e.g. a URL `new URL()` rejects) must not take the service down.
+      try {
+        if (!res.headersSent) res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
+        res.end('bad request');
+      } catch {
+        /* socket already gone */
       }
-      const html = page();
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      res.end(html);
-      return;
     }
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204, corsHeaders(origin));
-      res.end();
-      return;
-    }
-    if (url.pathname.startsWith('/api/')) {
-      handleApi(req, res, url.pathname).catch((cause) => {
-        if (!res.headersSent) json(res, cause.status || 500, { ok: false, error: cause.message });
-        else res.end();
-      });
-      return;
-    }
-    res.writeHead(404).end('not found');
   });
 
   return new Promise((resolve, reject) => {
     let attempt = 0;
     const listen = (port) => {
       server.once('error', (cause) => {
-        if (cause.code === 'EADDRINUSE' && attempt < 10) {
+        if (cause.code === 'EADDRINUSE' && !options.strictPort && attempt < 10) {
           attempt += 1;
           listen(base + attempt);
           return;
@@ -410,6 +385,50 @@ function start(options = {}) {
     };
     listen(base);
   });
+}
+
+function handleRequest(req, res, serveUi) {
+  const origin = req.headers.origin;
+  if (!hostAllowed(req.headers.host)) {
+    res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' }).end('forbidden: host');
+    return;
+  }
+  if (!originAllowed(origin)) {
+    res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' }).end('forbidden: origin');
+    return;
+  }
+  res.corsOrigin = origin || null;
+
+  const url = new URL(req.url, 'http://127.0.0.1');
+  if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+    if (!serveUi) {
+      json(res, 200, {
+        name: 'dsh-delegate',
+        mode: 'api-only',
+        ui: false,
+        endpoints: ['/api/state', '/api/model', '/api/settings', '/api/env', '/api/runs', '/api/quota', '/api/test', '/api/clients/install'],
+        hint: '这是仅 API 模式；用 dsh-delegate daemon（不带 --no-ui）启动看板。',
+      });
+      return;
+    }
+    const html = page();
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(html);
+    return;
+  }
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, corsHeaders(origin));
+    res.end();
+    return;
+  }
+  if (url.pathname.startsWith('/api/')) {
+    handleApi(req, res, url.pathname).catch((cause) => {
+      if (!res.headersSent) json(res, cause.status || 500, { ok: false, error: cause.message });
+      else res.end();
+    });
+    return;
+  }
+  res.writeHead(404).end('not found');
 }
 
 module.exports = { start };

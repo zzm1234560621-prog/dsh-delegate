@@ -72,7 +72,7 @@ cd dsh-delegate
 | `--dry-run` | 只列出会改动的文件，不写入 |
 | `--targets=claude-code,codex` | 只接指定的客户端（默认三个都接） |
 | `--copy-credentials` | 把 DSH 里已存的 `DEEPSEEK_API_KEY` 复制到 headless 能读的 `.env` |
-| `--autostart` | 登录时自动启动本机看板服务 |
+| `--autostart` | 让本机看板服务一直在：登录时启动，停了自动拉起 |
 | `--usage-hooks` | 给 Claude Code 加额度记录和派活提醒（会改 `~/.claude/settings.json`） |
 
 拼错的参数会直接报错退出，不会误装。
@@ -188,14 +188,14 @@ Claude Code 或 Codex 的套餐额度快用完时，dsh-delegate 提醒它们把
 ```bash
 dsh-delegate ui --open         # 启动服务并在浏览器打开看板：http://127.0.0.1:7788
 dsh-delegate daemon --no-ui    # 只要 API，不要看板
-dsh-delegate autostart on      # 登录自启动
+dsh-delegate autostart on      # 登录时启动，停了自动拉起
 dsh-delegate status
 dsh-delegate quota             # 查看 Claude / Codex 额度和当前档位
 ```
 
 服务只监听 `127.0.0.1`，只接受本机进程、本机页面（看板自己、`dsh web`）和 DSH 桌面版的请求；其他网站从浏览器发来的请求一律返回 403。如果确实需要放行别的来源，可以用环境变量 `DSH_DELEGATE_ALLOWED_ORIGINS` 追加。
 
-服务不随 Claude 或 DSH 启动。要它一直在，就开登录自启：`dsh-delegate autostart on`。
+服务不随 Claude 或 DSH 启动。要它一直在，就开自启：`dsh-delegate autostart on`。Windows 上用的是计划任务，登录时启动，之后每 5 分钟检查一次，服务停了会自动拉起；macOS 的 LaunchAgent 在服务异常退出时重启它；Linux 只在登录时启动。服务每次启动和退出都记录在 `$DSH_HOME/delegate-daemon.log`。
 
 ## 自检与测试
 
