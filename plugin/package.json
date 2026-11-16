@@ -1,6 +1,6 @@
 {
   "name": "dsh-delegate",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Let Claude Desktop / Claude Code / Codex call a local DeepSeek Harness (DSH) over MCP, with a panel inside the DSH web UI.",
   "type": "module",
   "license": "MIT",
