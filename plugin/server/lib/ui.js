@@ -183,6 +183,23 @@ async function handleApi(req, res, pathname) {
   if (pathname === '/api/runs/retry' && req.method === 'POST') {
     const body = await readBody(req);
     const resume = require('./resume');
+    // 按 session id 直接续接（恢复清单里的任务可能已经找不到原运行记录）
+    if (Array.isArray(body.sessions) && body.sessions.length) {
+      const metas = body.sessions
+        .filter((item) => item && /^[A-Za-z0-9._:-]+$/.test(String(item.sessionId || '')))
+        .map((item) => ({
+          id: 'manual:' + item.sessionId,
+          title: item.title || '手动续接',
+          cwd: item.cwd,
+          sessionId: item.sessionId,
+          state: 'failed',
+          reason: 'manual',
+        }));
+      resume
+        .resumeMany(metas, { concurrency: Number(body.concurrency) || 2, task: body.task })
+        .catch(() => {});
+      return json(res, 200, { ok: true, started: metas.map((m) => ({ id: m.id, title: m.title })), skipped: [] });
+    }
     const { candidates, skipped } = resume.pickCandidates({
       ids: Array.isArray(body.ids) ? body.ids : null,
       limit: Number.isFinite(body.limit) ? body.limit : 8,
