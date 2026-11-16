@@ -1,0 +1,140 @@
+'use strict';
+
+/**
+ * 继续失败的任务。
+ *
+ * 失败的运行记录里带着 sessionId，DSH 支持用 --session-id 续接同一个会话，所以
+ * 「继续」不是重跑，而是让子代理接着上次的上下文往下做。只对可重试的失败
+ * （网关超时、连接被重置、过载）自动继续；写作用域错误、任务写错这类不会重试。
+ */
+
+const dsh = require('./dsh');
+const runlog = require('./runlog');
+const { readSettings } = require('./config');
+
+const RETRYABLE = /TIMEOUT|timed out|ECONNRESET|ETIMEDOUT|socket hang up|overloaded|ECONNREFUSED|502|503|529|rate.?limit/i;
+
+/** 正在续接的源记录 / 正在使用的会话；同一目标绝不并发。 */
+const inFlight = new Set();
+const busySessions = new Set();
+
+const CONTINUE_PROMPT = [
+  '继续上一次没做完的任务。',
+  '先确认当前目录和文件的实际状态（已经改到哪一步），然后只补还没做的部分，不要从头重来。',
+  '做完用一段话汇报：完成了什么、还剩什么、有没有需要我拿主意的地方。',
+].join('\n');
+
+/** 这条记录值得继续吗（成功的、没有 session 的、不可重试的都不算）。 */
+function retryable(meta) {
+  if (!meta || meta.state !== 'failed') return false;
+  if (!meta.sessionId) return false;
+  return RETRYABLE.test(String(meta.reason || ''));
+}
+
+/** 已经被继续过的源记录 id，避免自动继续反复触发。 */
+function alreadyResumed() {
+  const seen = new Set();
+  for (const run of runlog.listRuns(500)) {
+    if (run.sourceRunId) seen.add(run.sourceRunId);
+  }
+  return seen;
+}
+
+/**
+ * 挑出要继续的记录：默认全部可重试的失败，倒序，去重。
+ * @returns {{candidates: object[], skipped: {id: string, why: string}[]}}
+ */
+function pickCandidates(options = {}) {
+  const limit = Number.isFinite(options.limit) ? options.limit : 8;
+  const runs = runlog.listRuns(500);
+  const resumed = alreadyResumed();
+  const byId = new Map(runs.map((run) => [run.id, run]));
+
+  const wanted = options.ids && options.ids.length ? options.ids.map((id) => byId.get(id)).filter(Boolean) : runs;
+
+  const candidates = [];
+  const skipped = [];
+  for (const run of wanted) {
+    if (run.sourceRunId) {
+      skipped.push({ id: run.id, why: '这是一次续接，跳过' });
+      continue;
+    }
+    if (!retryable(run)) {
+      skipped.push({ id: run.id, why: run.state !== 'failed' ? `状态是 ${run.state}` : run.sessionId ? '错误不可重试' : '没有 session id' });
+      continue;
+    }
+    if (resumed.has(run.id)) {
+      skipped.push({ id: run.id, why: '已经继续过' });
+      continue;
+    }
+    if (inFlight.has(run.id) || busySessions.has(run.sessionId)) {
+      skipped.push({ id: run.id, why: '正在继续中' });
+      continue;
+    }
+    candidates.push(run);
+    if (options.ids ? false : candidates.length >= limit) break;
+  }
+  return { candidates, skipped };
+}
+
+/** 继续一条记录，返回新记录的结果。 */
+async function resumeOne(meta, options = {}) {
+  inFlight.add(meta.id);
+  busySessions.add(meta.sessionId);
+  const record = runlog.createRun({
+    kind: 'resume',
+    title: `继续：${String(meta.title || meta.id).slice(0, 48)}`,
+    cwd: meta.cwd,
+    sourceRunId: meta.id,
+  });
+  runlog.append(record, { kind: 'text', text: `续接会话 ${meta.sessionId}` });
+
+  const result = await dsh.runTask({
+    task: options.task || CONTINUE_PROMPT,
+    cwd: meta.cwd,
+    sessionId: meta.sessionId,
+    permissionMode: meta.permissionMode,
+    approvalPolicy: meta.approvalPolicy,
+    timeoutMs: options.timeoutMs || 0,
+  });
+
+  runlog.finish(record, result);
+  inFlight.delete(meta.id);
+  busySessions.delete(meta.sessionId);
+  return { source: meta.id, run: record.id, ok: Boolean(result.ok), reason: result.reason || null };
+}
+
+/**
+ * 并发继续多条（默认 2，避免又把网关压垮）。
+ * @returns {Promise<{results: object[], failed: number}>}
+ */
+async function resumeMany(metas, options = {}) {
+  const concurrency = Math.max(1, Math.min(Number(options.concurrency) || 2, 8));
+  const queue = metas.slice();
+  const results = [];
+  const workers = Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
+    while (queue.length) {
+      const meta = queue.shift();
+      try {
+        results.push(await resumeOne(meta, options));
+      } catch (cause) {
+        results.push({ source: meta.id, ok: false, reason: cause.message });
+      }
+    }
+  });
+  await Promise.all(workers);
+  return { results, failed: results.filter((item) => !item.ok).length };
+}
+
+/** 自动继续：给守护进程的定时器调用。 */
+async function autoResumeTick(options = {}) {
+  const settings = readSettings();
+  if (settings.autoResume === false) return { resumed: 0, reason: 'autoResume 已关闭' };
+  const limit = Number.isFinite(settings.autoResumeLimit) ? settings.autoResumeLimit : 2;
+  const { candidates } = pickCandidates({ limit });
+  if (!candidates.length) return { resumed: 0 };
+  const { results } = await resumeMany(candidates, { concurrency: options.concurrency || 2 });
+  return { resumed: results.length, results };
+}
+
+module.exports = { CONTINUE_PROMPT, retryable, pickCandidates, resumeOne, resumeMany, autoResumeTick };

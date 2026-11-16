@@ -555,6 +555,29 @@ function commandAutostart(args) {
   log(`服务：${daemon.running ? `运行中 ${daemon.url} (pid ${daemon.pid})` : '未运行'}`);
 }
 
+function commandRetry(args) {
+  const resume = require('../lib/resume');
+  const limit = Number(args.limit) || 8;
+  const concurrency = Number(args.concurrency) || 2;
+  const ids = typeof args.id === 'string' ? [args.id] : Array.isArray(args.id) ? args.id : null;
+  const { candidates, skipped } = resume.pickCandidates({ ids, limit });
+  if (!candidates.length) {
+    log('没有可继续的任务。' + (skipped.length ? `（跳过 ${skipped.length} 条）` : ''));
+    return;
+  }
+  log(`继续 ${candidates.length} 个任务（并发 ${concurrency}）…`);
+  for (const run of candidates) log(`  · ${run.title || run.id} — ${run.reason || ''}`.trim());
+  resume
+    .resumeMany(candidates, { concurrency })
+    .then(({ results, failed }) => {
+      log(`完成：${results.length - failed} 成功，${failed} 失败。`);
+      for (const item of results) {
+        if (!item.ok) log(`  ✗ ${item.source}: ${item.reason || '失败'}`);
+      }
+    })
+    .catch((cause) => log(`继续失败：${cause.message}`));
+}
+
 function commandStatus() {
   const daemon = require('../lib/daemon').status();
   const autostart = require('../lib/autostart').status();
@@ -585,6 +608,7 @@ async function main() {
   if (command === 'ui') return commandUi(args);
   if (command === 'daemon' || command === 'service') return commandDaemon(args);
   if (command === 'autostart') return commandAutostart(args);
+  if (command === 'retry') return commandRetry(args);
   if (command === 'status') return commandStatus();
   if (command === 'statusline') return commandStatusline();
   if (command === 'hook') return commandHook(args);
@@ -595,6 +619,7 @@ async function main() {
 用法：
   dsh-delegate install [--targets=claude-desktop,claude-code,codex] [--dry-run] [--copy-credentials] [--autostart] [--usage-hooks]
   dsh-delegate quota                                     # Claude / Codex 额度和当前派活档位
+  dsh-delegate retry [--limit=8] [--concurrency=2] [--id=run-...]   # 继续失败的任务
   dsh-delegate statusline | hook prompt                  # Claude Code 的 statusLine / UserPromptSubmit（--usage-hooks 配好）
   dsh-delegate daemon [--port=7788] [--no-ui] [--open]   # 常驻服务（可选是否带看板）
   dsh-delegate ui [--port=7788] [--open]                 # daemon + 看板（--open 顺便打开浏览器）

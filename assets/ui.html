@@ -395,6 +395,7 @@
       <span class="pill" id="token-total">tokens —</span>
       <span class="pill" id="more-info"></span>
       <div style="flex:1"></div>
+      <button class="ghost" id="resume-failed" hidden>继续失败的</button>
       <button class="ghost" id="more-runs" hidden>显示更多</button>
       <button class="ghost" id="toggle-finished">显示已结束</button>
       <button class="ghost" id="refresh-runs">立即刷新</button>
@@ -609,6 +610,9 @@ async function loadRuns() {
         : !showFinished && finished.length
           ? '已结束的 ' + finished.length + ' 条已隐藏'
           : '';
+    const failedCount = finished.filter((run) => run.state === 'failed' && run.sessionId).length;
+    el('resume-failed').hidden = failedCount === 0;
+    el('resume-failed').textContent = '继续失败的 (' + failedCount + ')';
     el('more-runs').hidden = remaining <= 0;
     el('more-runs').textContent = remaining > 0 ? '显示更多 (' + remaining + ')' : '';
 
@@ -1342,6 +1346,25 @@ async function load() {
 
 el('refresh').addEventListener('click', () => load().catch(showError));
 el('refresh-runs').addEventListener('click', () => loadRuns());
+el('resume-failed').addEventListener('click', async () => {
+  const button = el('resume-failed');
+  button.disabled = true;
+  button.textContent = '正在继续…';
+  try {
+    const result = await api('/api/runs/retry', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ limit: 8, concurrency: 2 }),
+    });
+    button.textContent = '已继续 ' + ((result.started && result.started.length) || 0) + ' 个';
+    await loadRuns();
+  } catch (cause) {
+    button.textContent = '继续失败：' + cause.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
 el('more-runs').addEventListener('click', async () => {
   extraCards += Math.max(8, visibleColumns() * 2);
   await loadRuns();

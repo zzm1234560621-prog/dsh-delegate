@@ -118,6 +118,19 @@ async function run(options = {}) {
   });
   process.on('exit', (code) => logLine(`exit code ${code}`));
 
+  // Auto-resume: retryable failures (gateway timeouts) are re-dispatched in the
+  // background, a couple at a time so the provider is not hammered again.
+  const resumeTimer = setInterval(() => {
+    const resume = require('./resume');
+    resume
+      .autoResumeTick()
+      .then((outcome) => {
+        if (outcome.resumed) logLine(`auto-resume started ${outcome.resumed}`);
+      })
+      .catch((cause) => logLine(`auto-resume failed: ${cause.message}`));
+  }, 30_000);
+  resumeTimer.unref?.();
+
   return { url, server };
 }
 
