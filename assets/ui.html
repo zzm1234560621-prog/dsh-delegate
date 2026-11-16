@@ -241,7 +241,7 @@
           <option value="off">关闭</option>
           <option value="on">开启（开机即起服务，按上面模式）</option>
         </select>
-        <div class="hint">Windows 写 HKCU Run 隐藏启动，macOS 用 LaunchAgent，Linux 用 XDG autostart。</div>
+        <div class="hint">Windows 用计划任务：登录时启动，之后每 5 分钟检查一次，服务停了会自动拉起；macOS 用 LaunchAgent（异常退出自动重启）；Linux 用 XDG autostart（仅登录时）。启动和退出记录在 $DSH_HOME/delegate-daemon.log。</div>
       </div>
       <div style="display:flex; align-items:flex-end; gap:8px;">
         <button id="svc-save">保存</button>

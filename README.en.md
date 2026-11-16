@@ -72,7 +72,7 @@ Both scripts take the same flags (on Windows, `-DryRun` / `-Targets` work too):
 | `--dry-run` | List the files that would change, write nothing |
 | `--targets=claude-code,codex` | Wire only these clients (default: all three) |
 | `--copy-credentials` | Copy the `DEEPSEEK_API_KEY` saved in DSH into the `.env` headless reads |
-| `--autostart` | Start the local dashboard service at login |
+| `--autostart` | Keep the local dashboard service running: start it at login, bring it back if it stops |
 | `--usage-hooks` | Add quota recording and delegation reminders to Claude Code (edits `~/.claude/settings.json`) |
 
 A misspelled flag aborts instead of installing.
@@ -190,14 +190,14 @@ Below, `dsh-delegate` means `node ~/.dsh/bridge/bin/dsh-delegate.js` (on Windows
 ```bash
 dsh-delegate ui --open         # start the service and open the dashboard: http://127.0.0.1:7788
 dsh-delegate daemon --no-ui    # API only, no dashboard
-dsh-delegate autostart on      # start at login
+dsh-delegate autostart on      # start at login, restart it if it stops
 dsh-delegate status
 dsh-delegate quota             # show Claude / Codex quota and current tier
 ```
 
 The service listens on `127.0.0.1` only and accepts requests only from local processes, local pages (the dashboard itself, `dsh web`) and the DSH desktop app. Requests that other websites send from your browser get a 403. If you really need another origin, add it with the `DSH_DELEGATE_ALLOWED_ORIGINS` environment variable.
 
-The service doesn't start with Claude or DSH. To keep it running, turn on autostart at login: `dsh-delegate autostart on`.
+The service doesn't start with Claude or DSH. To keep it running, turn on autostart: `dsh-delegate autostart on`. On Windows that is a scheduled task that starts it at login and checks every 5 minutes, bringing it back if it stopped; on macOS the LaunchAgent restarts it after an abnormal exit; on Linux it only starts at login. Every start and exit of the service is logged to `$DSH_HOME/delegate-daemon.log`.
 
 ## Checks and tests
 

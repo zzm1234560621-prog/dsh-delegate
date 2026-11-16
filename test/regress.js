@@ -710,6 +710,65 @@ async function quotaSuite() {
   );
 }
 
+// ---------------------------------------------------------------- keeping the service alive
+
+function rawRequest(port, line) {
+  return new Promise((resolve) => {
+    const socket = require('node:net').connect(port, '127.0.0.1', () =>
+      socket.end(`${line}\r\nHost: 127.0.0.1:${port}\r\n\r\n`),
+    );
+    let text = '';
+    socket.on('data', (chunk) => {
+      text += chunk;
+    });
+    socket.on('close', () => resolve(text.split('\r\n')[0] || '(no response)'));
+    socket.on('error', (error) => resolve(`ERR ${error.message}`));
+  });
+}
+
+async function serviceSuite() {
+  console.log('\n== 本机服务：看门狗、坏请求、端口不漂移 ==');
+  const autostart = require(path.join(ROOT, 'lib', 'autostart.js'));
+  const xml = autostart.windowsTaskXml({ vbs: 'C:\\x & y\\daemon.vbs', userId: 'PC\\me', start: '2026-11-16T09:00:00' });
+  check(
+    'Windows 计划任务：登录时 + 定时，每 5 分钟重复',
+    /<LogonTrigger>[\s\S]*PT5M[\s\S]*<\/LogonTrigger>/.test(xml) && /<TimeTrigger>[\s\S]*PT5M[\s\S]*<\/TimeTrigger>/.test(xml),
+  );
+  check(
+    '计划任务：用电池也跑、不重复启动、指向自己的启动脚本（已转义）',
+    /<DisallowStartIfOnBatteries>false/.test(xml) && /<MultipleInstancesPolicy>IgnoreNew/.test(xml) &&
+      xml.includes('//B "C:\\x &amp; y\\daemon.vbs"'),
+  );
+  const plist = autostart.macPlist({ args: ['/n/node', '/b/cli.js', 'daemon'], log: '/h/.dsh/out.log' });
+  check('macOS LaunchAgent：异常退出才重启', /<key>KeepAlive<\/key>\s*<dict>\s*<key>SuccessfulExit<\/key><false\/>/.test(plist));
+
+  const sb = sandbox('service');
+  const port = 30000 + Math.floor(Math.random() * 10000);
+  const first = spawn(NODE, [CLI, 'daemon', `--port=${port}`, '--no-ui'], { env: envFor(sb), stdio: 'ignore' });
+  const log = path.join(sb.home, 'delegate-daemon.log');
+  for (let i = 0; i < 50 && !(fs.existsSync(log) && /started/.test(fs.readFileSync(log, 'utf8'))); i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  check('服务启动时写日志', fs.existsSync(log) && /pid \d+ started http:\/\/127\.0\.0\.1:\d+/.test(fs.readFileSync(log, 'utf8')));
+
+  const bad = await rawRequest(port, 'GET //[ HTTP/1.1');
+  const empty = await rawRequest(port, 'GET // HTTP/1.1');
+  const alive = await request(`http://127.0.0.1:${port}`, 'GET', '/api/service');
+  check('地址格式错误的请求得到 400，服务不会因此退出', /400/.test(bad) && /400/.test(empty) && alive.status === 200, `${bad} | ${empty} | ${alive.status}`);
+
+  // A second copy (no state file to tell it) on the same port must leave the first alone.
+  const other = sandbox('service2');
+  const second = spawnSync(NODE, [CLI, 'daemon', `--port=${port}`, '--no-ui'], { env: envFor(other), encoding: 'utf8', timeout: 30_000 });
+  const drifted = await request(`http://127.0.0.1:${port + 1}`, 'GET', '/api/service');
+  check('同端口第二个实例识别出“已在运行”并退出', second.status === 0 && /已在运行/.test(second.stdout), (second.stdout + second.stderr).trim());
+  check('不会悄悄换到下一个端口', drifted.status === 0, `port+1 → ${drifted.status}`);
+
+  const logged = spawnSync(NODE, ['-e', `require(${req('daemon.js')}).logLine('probe-line')`], { env: envFor(other), encoding: 'utf8' });
+  const otherLog = path.join(other.home, 'delegate-daemon.log');
+  check('logLine 追加带时间和 pid 的一行', logged.status === 0 && fs.existsSync(otherLog) && /Z pid \d+ probe-line/.test(fs.readFileSync(otherLog, 'utf8')));
+  first.kill();
+}
+
 // ---------------------------------------------------------------- bundle
 
 console.log('\n== 插件包里的服务与 lib/ 同步 ==');
@@ -728,6 +787,7 @@ console.log('\n== 插件包里的服务与 lib/ 同步 ==');
   await mcpSuite();
   await jobRecoverySuite();
   await quotaSuite();
+  await serviceSuite();
   for (const dir of sandboxes) {
     try {
       fs.rmSync(dir, { recursive: true, force: true });
