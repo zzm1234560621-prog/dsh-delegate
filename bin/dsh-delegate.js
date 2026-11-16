@@ -560,7 +560,8 @@ function commandRetry(args) {
   const limit = Number(args.limit) || 8;
   const concurrency = Number(args.concurrency) || 2;
   const ids = typeof args.id === 'string' ? [args.id] : Array.isArray(args.id) ? args.id : null;
-  const { candidates, skipped } = resume.pickCandidates({ ids, limit });
+  const force = Boolean(args.force) || Boolean(args.all);
+  const { candidates, skipped } = resume.pickCandidates({ ids, limit, force });
   if (!candidates.length) {
     log('没有可继续的任务。' + (skipped.length ? `（跳过 ${skipped.length} 条）` : ''));
     return;

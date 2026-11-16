@@ -26,7 +26,7 @@ const CONTINUE_PROMPT = [
 
 /** 这条记录值得继续吗（成功的、没有 session 的、不可重试的都不算）。 */
 function retryable(meta) {
-  if (!meta || meta.state !== 'failed') return false;
+  if (!meta || (meta.state !== 'failed' && meta.state !== 'lost')) return false;
   if (!meta.sessionId) return false;
   return RETRYABLE.test(String(meta.reason || ''));
 }
@@ -46,6 +46,7 @@ function alreadyResumed() {
  */
 function pickCandidates(options = {}) {
   const limit = Number.isFinite(options.limit) ? options.limit : 8;
+  const force = options.force === true;
   const runs = runlog.listRuns(500);
   const resumed = alreadyResumed();
   const byId = new Map(runs.map((run) => [run.id, run]));
@@ -63,7 +64,7 @@ function pickCandidates(options = {}) {
       skipped.push({ id: run.id, why: run.state !== 'failed' ? `状态是 ${run.state}` : run.sessionId ? '错误不可重试' : '没有 session id' });
       continue;
     }
-    if (resumed.has(run.id)) {
+    if (!force && resumed.has(run.id)) {
       skipped.push({ id: run.id, why: '已经继续过' });
       continue;
     }
@@ -110,6 +111,13 @@ async function resumeOne(meta, options = {}) {
  */
 async function resumeMany(metas, options = {}) {
   const concurrency = Math.max(1, Math.min(Number(options.concurrency) || 2, 8));
+  // Reserve the whole batch up front: a source that is merely queued must already
+  // look busy, or the 30s auto-resume tick picks it again and the two children
+  // fight over the same session ("already owned by an active write handle").
+  for (const meta of metas) {
+    inFlight.add(meta.id);
+    if (meta.sessionId) busySessions.add(meta.sessionId);
+  }
   const queue = metas.slice();
   const results = [];
   const workers = Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
@@ -123,6 +131,10 @@ async function resumeMany(metas, options = {}) {
     }
   });
   await Promise.all(workers);
+  for (const meta of metas) {
+    inFlight.delete(meta.id);
+    if (meta.sessionId) busySessions.delete(meta.sessionId);
+  }
   return { results, failed: results.filter((item) => !item.ok).length };
 }
 
