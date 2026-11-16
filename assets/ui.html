@@ -1160,9 +1160,13 @@ async function loadCatalogs(force) {
   if (force) {
     const id = el('provider').value;
     const count = catalogFor(id).length;
+    // 只把「当前供应商」的问题当失败：另一条目录缺 key 不影响这里能用。
+    const others = Object.entries((catalogs && catalogs.errors) || {})
+      .filter(([key]) => key !== id && key !== '_')
+      .map(([key, why]) => key + ' ' + why);
     msg.className = count ? 'msg ok' : 'msg err';
     msg.textContent = count
-      ? '已刷新：' + count + ' 个模型可选。'
+      ? '已刷新：' + count + ' 个模型可选。' + (others.length ? '（其它供应商：' + others.join('；') + '）' : '')
       : '接口没返回模型：' + ((catalogs.errors && (catalogs.errors[id] || catalogs.errors._)) || '未知原因');
   }
   renderModel();
