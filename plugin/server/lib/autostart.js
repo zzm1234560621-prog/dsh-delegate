@@ -21,6 +21,8 @@ const { execFileSync } = require('node:child_process');
 const NAME = 'dsh-delegate';
 const WATCH_MINUTES = 5;
 
+/** This copy's CLI. Install passes the deployed one (~/.dsh/bridge) instead: the
+ *  folder an installer runs from may be temporary, and the service must outlive it. */
 function cliPath() {
   return path.join(__dirname, '..', 'bin', 'dsh-delegate.js');
 }
@@ -38,14 +40,14 @@ function vbsPath() {
 }
 
 /** Autostart follows the saved mode: dashboard or API-only. */
-function daemonArgs(port) {
+function daemonArgs(port, cli = cliPath()) {
   const ui = require('./config').readSettings().daemonUi !== false;
-  return [cliPath(), 'daemon', ...(ui ? [] : ['--no-ui']), `--port=${port}`];
+  return [cli, 'daemon', ...(ui ? [] : ['--no-ui']), `--port=${port}`];
 }
 
-function windowsVbs(port) {
+function windowsVbs(port, cli = cliPath()) {
   const ui = require('./config').readSettings().daemonUi !== false;
-  const command = `"${nodePath()}" "${cliPath()}" daemon${ui ? '' : ' --no-ui'} --port=${port}`;
+  const command = `"${nodePath()}" "${cli}" daemon${ui ? '' : ' --no-ui'} --port=${port}`;
   return [
     "' dsh-delegate 自启动（隐藏窗口）",
     'Set shell = CreateObject("WScript.Shell")',
@@ -209,10 +211,10 @@ function status() {
   return { enabled, ours: enabled, watchdog: false, mechanism: 'XDG autostart（仅登录时）', target: desktop };
 }
 
-function enableWindows(port) {
+function enableWindows(port, cli) {
   const vbs = vbsPath();
   fs.mkdirSync(path.dirname(vbs), { recursive: true });
-  fs.writeFileSync(vbs, windowsVbs(port));
+  fs.writeFileSync(vbs, windowsVbs(port, cli));
 
   const xmlFile = path.join(os.tmpdir(), `dsh-delegate-task-${process.pid}.xml`);
   try {
@@ -241,16 +243,18 @@ function enableWindows(port) {
   return { enabled: true, watchdog: true, mechanism: `计划任务（登录时 + 每 ${WATCH_MINUTES} 分钟检查）`, target: vbs };
 }
 
+/** options.cli: the dsh-delegate.js the service runs (default: this copy's). */
 function enable(options = {}) {
   const port = Number(options.port) || 7788;
+  const cli = options.cli || cliPath();
 
-  if (process.platform === 'win32') return enableWindows(port);
+  if (process.platform === 'win32') return enableWindows(port, cli);
 
   if (process.platform === 'darwin') {
     const dir = path.join(os.homedir(), 'Library', 'LaunchAgents');
     fs.mkdirSync(dir, { recursive: true });
     const plist = path.join(dir, 'dev.dsh-delegate.daemon.plist');
-    fs.writeFileSync(plist, macPlist({ args: [nodePath(), ...daemonArgs(port)], log: path.join(os.homedir(), '.dsh', 'delegate-daemon.out.log') }));
+    fs.writeFileSync(plist, macPlist({ args: [nodePath(), ...daemonArgs(port, cli)], log: path.join(os.homedir(), '.dsh', 'delegate-daemon.out.log') }));
     try {
       execFileSync('launchctl', ['unload', plist], { stdio: 'ignore' });
     } catch {
@@ -273,7 +277,7 @@ function enable(options = {}) {
 Type=Application
 Name=dsh-delegate
 Comment=Local DSH delegation service
-Exec="${nodePath()}" "${cliPath()}" ${daemonArgs(port).slice(1).join(' ')}
+Exec="${nodePath()}" "${cli}" ${daemonArgs(port, cli).slice(1).join(' ')}
 Terminal=false
 X-GNOME-Autostart-enabled=true
 `,

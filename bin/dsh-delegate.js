@@ -197,7 +197,9 @@ async function commandInstall(args) {
   }
 
   if (args.autostart && !dryRun) {
-    const result = require('../lib/autostart').enable({ port: Number(args.port) || 7788 });
+    // Run the copy just deployed to the bridge, not this package: the folder an
+    // installer runs from is often temporary (dsh-delegate-install.bat deletes it).
+    const result = require('../lib/autostart').enable({ port: Number(args.port) || 7788, cli: ctx.cliPath });
     results.push({ what: 'autostart', status: 'written', file: `${result.mechanism} → ${result.target}` });
   }
 
@@ -531,7 +533,9 @@ function commandAutostart(args) {
   const autostart = require('../lib/autostart');
   const port = Number(args.port) || 7788;
   if (action === 'on') {
-    const result = autostart.enable({ port });
+    // Same as install: prefer the deployed runtime over wherever this copy runs from.
+    const deployed = runtimeContext().cliPath;
+    const result = autostart.enable({ port, cli: fs.existsSync(deployed) ? deployed : undefined });
     require('../lib/config').writeSettings({ daemonAutostart: true, daemonPort: port });
     log(`已开启登录自启动（${result.mechanism}）：${result.target}`);
     const ui = require('../lib/config').readSettings().daemonUi !== false;

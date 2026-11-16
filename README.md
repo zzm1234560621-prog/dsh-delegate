@@ -45,7 +45,19 @@ Claude Desktop / Claude Code / Codex
 
 ### A. 安装脚本
 
-**下载安装包，不需要 git**：到 [Releases](https://github.com/zzm1234560621-prog/dsh-delegate/releases/latest) 下载 `dsh-delegate-v*.zip` 并解压。Windows 双击 `install.cmd`，窗口会停在结果页；macOS / Linux 在解压出的目录里运行 `sh install.sh`。
+**一键安装，不需要 git**：到 [Releases](https://github.com/zzm1234560621-prog/dsh-delegate/releases/latest) 下载：
+
+| 系统 | 下载 | 然后 |
+|---|---|---|
+| Windows | `dsh-delegate-install.bat` | 双击。它会下载最新的安装包并装好，再删掉临时文件，窗口停在结果页 |
+| macOS | `dsh-delegate.zip` | 双击解压，再双击里面的 `install.command`，在终端里装好 |
+| Linux | `dsh-delegate.zip` | 解压，在解压出的目录里运行 `sh install.sh` |
+
+- Windows：浏览器提示这类文件不常见时，选「保留」；双击后如果弹出「Windows 已保护你的电脑」，点「更多信息」→「仍要运行」。
+- `.bat` 下载不了安装包（连不上 GitHub）时：开代理后再双击；或者用别的办法拿到 `dsh-delegate.zip`，在 cmd 里先运行 `set DSH_DELEGATE_ZIP=C:\路径\dsh-delegate.zip`，再运行 `.bat`。下面的参数也能直接加，例如 `dsh-delegate-install.bat --autostart`。
+- macOS 第一次双击被拦下（“无法打开”或“无法验证开发者”）时：macOS 14 及更早版本，右键 →「打开」；macOS 15 起，到「系统设置 → 隐私与安全性」底部点「仍要打开」。也可以在终端里进入解压目录，运行 `sh install.sh`，效果一样。
+- Mac 没有单独的一键安装文件，因为浏览器下载的文件没有执行权限，双击跑不起来。所以 `install.command` 放在压缩包里。
+- `dsh-delegate.zip` 和 `dsh-delegate-v<版本>.zip` 是同一个包。在 Windows 上也可以解压后双击 `install.cmd`。
 
 **或者用 git 克隆**，Windows（PowerShell 或 cmd）：
 

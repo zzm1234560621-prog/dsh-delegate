@@ -2,15 +2,20 @@
 'use strict';
 
 /**
- * Build both release assets from a git ref, into dist/:
+ * Build the release assets from a git ref, into dist/:
  *
- *   dsh-delegate-v<version>.zip   everything, with install.cmd / install.sh (git archive)
+ *   dsh-delegate-v<version>.zip   everything, with install.cmd / install.command /
+ *                                 install.sh (git archive)
+ *   dsh-delegate.zip              the same zip under a version-free name, so
+ *                                 releases/latest/download/dsh-delegate.zip always works
+ *   dsh-delegate-install.bat      one-file Windows installer that fetches the above
  *   dsh-delegate-plugin.tgz       the DSH plugin (`npm pack` of plugin/), the file the
  *                                 marketplace entry downloads
  *
- * Both come from the ref itself, not the working tree. .gitattributes pins line
- * endings (install.sh LF, .cmd/.ps1 CRLF) and drops the marketplace notes from the
- * zip, whatever this checkout's core.autocrlf is.
+ * All of them come from the ref itself, not the working tree. .gitattributes pins
+ * line endings (install.sh / install.command LF, .cmd/.bat/.ps1 CRLF) and keeps the
+ * marketplace notes and installers/ out of the zip, whatever this checkout's
+ * core.autocrlf is.
  *
  *   npm run pack              # from HEAD
  *   npm run pack -- v1.4.0    # from a tag
@@ -36,6 +41,23 @@ const name = `dsh-delegate-v${version}`;
 const zip = path.join(dist, `${name}.zip`);
 git(['-c', 'core.autocrlf=false', 'archive', '--format=zip', `--prefix=${name}/`, '-o', zip, ref], { stdio: 'inherit' });
 console.log(`${path.relative(root, zip)}  ${size(zip)}  (${ref})`);
+
+const latestZip = path.join(dist, 'dsh-delegate.zip');
+fs.copyFileSync(zip, latestZip);
+console.log(`${path.relative(root, latestZip)}  ${size(latestZip)}  (same zip, version-free name)`);
+
+// The one-file Windows installer; cmd.exe wants CRLF, the blob is stored with LF.
+let batch = null;
+try {
+  batch = git(['show', `${ref}:installers/dsh-delegate-install.bat`], { stdio: ['ignore', 'pipe', 'ignore'] });
+} catch {
+  console.log('(no installers/dsh-delegate-install.bat at this ref, skipped)');
+}
+if (batch) {
+  const bat = path.join(dist, 'dsh-delegate-install.bat');
+  fs.writeFileSync(bat, batch.replace(/\r?\n/g, '\r\n'));
+  console.log(`${path.relative(root, bat)}  ${size(bat)}`);
+}
 
 // 2. The plugin tarball, packed from a clean checkout of the same ref.
 const npm = which('npm');

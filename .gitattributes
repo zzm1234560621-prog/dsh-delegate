@@ -1,12 +1,15 @@
-# Line endings are part of what we ship: install.sh must stay LF or it breaks
-# on macOS/Linux, and the Windows scripts want CRLF. Pinned here so neither a
-# checkout's core.autocrlf nor the release zip can change them.
+# Line endings are part of what we ship: install.sh and install.command must stay
+# LF or they break on macOS/Linux, and the Windows scripts want CRLF. Pinned here
+# so neither a checkout's core.autocrlf nor the release zip can change them.
 * text=auto eol=lf
+*.command text eol=lf
 *.cmd text eol=crlf
 *.bat text eol=crlf
 *.ps1 text eol=crlf
 
-# Left out of the release zip (git archive).
+# Left out of the release zip (git archive). installers/ holds the one-file
+# installers, which ship as release assets of their own.
+/installers export-ignore
 /marketplace export-ignore
 /MARKETPLACE.md export-ignore
 /.gitattributes export-ignore
