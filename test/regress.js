@@ -550,26 +550,181 @@ console.log('\n== 发布包：换行符由 .gitattributes 固定 ==');
   if (inGit.status !== 0) {
     console.log('  （不在 git 仓库里，跳过）');
   } else {
+    // The tracked files as they are now (uncommitted edits included, so this also
+    // checks before a commit); HEAD when there is nothing uncommitted.
+    const snapshot = spawnSync('git', ['stash', 'create'], { cwd: ROOT, encoding: 'utf8' }).stdout.trim() || 'HEAD';
     // Worst case: a Windows checkout with core.autocrlf=true.
     const tar = spawnSync(
       'git',
-      ['-c', 'core.autocrlf=true', 'archive', '--worktree-attributes', '--format=tar', 'HEAD', '--', 'install.sh', 'install.cmd'],
-      { cwd: ROOT, maxBuffer: 16 * 1024 * 1024 },
+      ['-c', 'core.autocrlf=true', 'archive', '--worktree-attributes', '--format=tar', snapshot],
+      { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 },
     );
     const files = {};
+    const modes = {};
     const buffer = tar.stdout || Buffer.alloc(0);
     for (let at = 0; at + 512 <= buffer.length; ) {
       const header = buffer.subarray(at, at + 512);
       const name = header.subarray(0, 100).toString('utf8').split('\0')[0];
       if (!name) break;
-      const size = parseInt(header.subarray(124, 136).toString('utf8').split('\0')[0].trim() || '0', 8);
+      const field = (start, end) => header.subarray(start, end).toString('utf8').split('\0')[0].trim() || '0';
+      const size = parseInt(field(124, 136), 8);
       files[name] = buffer.subarray(at + 512, at + 512 + size);
+      modes[name] = parseInt(field(100, 108), 8);
       at += 512 + Math.ceil(size / 512) * 512;
     }
     const sh = files['install.sh'];
     const cmd = files['install.cmd'];
+    const command = files['install.command'];
     check('发布包里 install.sh 是 LF（macOS / Linux 能跑）', Boolean(sh) && !sh.includes(13), sh ? 'contains CR' : 'install.sh 不在包里');
     check('发布包里 install.cmd 是 CRLF', Boolean(cmd) && cmd.includes('\r\n'));
+    check(
+      '发布包里 install.command 是 LF 且可执行（macOS 双击能跑）',
+      Boolean(command) && !command.includes(13) && (modes['install.command'] & 0o111) === 0o111,
+      command ? `mode ${(modes['install.command'] || 0).toString(8)}` : 'install.command 不在包里',
+    );
+    const shipped = Object.keys(files).filter((name) => name.startsWith('installers/'));
+    check('单文件安装器不进 zip（单独作为 Release 附件）', shipped.length === 0, shipped.join(', '));
+  }
+}
+
+// ---------------------------------------------------------------- one-file installers
+
+/** A POSIX sh for the macOS / Linux scripts: /bin/sh, or the one Git for Windows ships. */
+function posixShell() {
+  if (!WIN) return fs.existsSync('/bin/sh') ? { bin: '/bin/sh', dir: '/bin' } : null;
+  const found = spawnSync('where', ['git'], { encoding: 'utf8' });
+  for (const line of (found.stdout || '').split(/\r?\n/).filter(Boolean)) {
+    // ...\Git\cmd\git.exe or ...\Git\mingw64\bin\git.exe → ...\Git\usr\bin\sh.exe
+    let dir = path.dirname(line.trim());
+    for (let i = 0; i < 4; i += 1) {
+      const sh = path.join(dir, 'usr', 'bin', 'sh.exe');
+      if (fs.existsSync(sh)) return { bin: sh, dir: path.dirname(sh) };
+      dir = path.dirname(dir);
+    }
+  }
+  return null;
+}
+
+console.log('\n== macOS：双击运行的 install.command ==');
+{
+  const shell = posixShell();
+  if (!shell) {
+    console.log('  （没有 POSIX sh，跳过）');
+  } else {
+    const sb = sandbox('command');
+    const elsewhere = path.join(sb.dir, 'elsewhere');
+    fs.mkdirSync(elsewhere);
+    // Finder starts it from the home folder, not from the package.
+    const script = path.join(ROOT, 'install.command').replace(/\\/g, '/');
+    const env = envFor(sb, { ...FAKE_DESKTOP, PATH: [shell.dir, path.dirname(NODE), ...SYS].join(path.delimiter) });
+    const run = (...args) => spawnSync(shell.bin, [script, ...args], { cwd: elsewhere, env, encoding: 'utf8', timeout: 120_000 });
+    const dry = run('--dry-run');
+    check(
+      '在别的目录里运行也能找到同目录的 install.sh，参数照传',
+      dry.status === 0 && /dry-run/.test(dry.stdout) && !fs.existsSync(path.join(sb.home, 'bridge')),
+      `exit ${dry.status} ${(dry.stderr || '').trim().slice(0, 200)}`,
+    );
+    const bad = run('--dryrun');
+    check('安装失败时带回非 0 退出码；没有终端时不等回车', typeof bad.status === 'number' && bad.status !== 0, `exit ${bad.status}`);
+  }
+}
+
+/** A release-shaped zip of this working tree: one dsh-delegate-v<version> folder. */
+function stagePackage(sb) {
+  const pkg = path.join(sb.dir, 'stage', 'dsh-delegate-vTEST');
+  for (const entry of ['bin', 'lib', 'assets']) fs.cpSync(path.join(ROOT, entry), path.join(pkg, entry), { recursive: true });
+  for (const file of ['package.json', 'install.cmd', 'install.ps1']) fs.copyFileSync(path.join(ROOT, file), path.join(pkg, file));
+  const zip = path.join(sb.dir, 'dsh-delegate.zip');
+  const made = spawnSync(
+    path.join(SYS[0], 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    ['-NoProfile', '-Command', 'Compress-Archive -LiteralPath $env:PKG -DestinationPath $env:OUT'],
+    { env: { ...process.env, PKG: pkg, OUT: zip }, encoding: 'utf8', timeout: 120_000 },
+  );
+  return made.status === 0 && fs.existsSync(zip) ? zip : null;
+}
+
+async function batSuite() {
+  console.log('\n== Windows：单文件安装器 dsh-delegate-install.bat ==');
+  const sb = sandbox('bat');
+  const zip = stagePackage(sb);
+  if (!zip) {
+    check('打出测试用的安装包', false);
+    return;
+  }
+  const temp = path.join(sb.dir, 'temp');
+  fs.mkdirSync(temp);
+  const syscalls = path.join(sb.dir, 'syscalls.log');
+  const bat = path.join(ROOT, 'installers', 'dsh-delegate-install.bat');
+  const runBat = (args, extra) =>
+    new Promise((resolve) => {
+      const env = envFor(sb, {
+        ...FAKE_DESKTOP,
+        PATH: [path.dirname(NODE), ...SYS, path.join(SYS[0], 'WindowsPowerShell', 'v1.0')].join(path.delimiter),
+        TEMP: temp,
+        TMP: temp,
+        DSH_DELEGATE_NO_PAUSE: '1',
+        // --autostart would register the real per-user scheduled task: record it instead.
+        NODE_OPTIONS: `--require ${JSON.stringify(path.join(__dirname, 'fixtures', 'record-system-calls.js'))}`,
+        DSH_REGRESS_SYSCALLS: syscalls,
+        ...extra,
+      });
+      const child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `""${bat}" ${args.join(' ')}"`], {
+        env,
+        windowsVerbatimArguments: true,
+      });
+      let out = '';
+      child.stdout.on('data', (chunk) => (out += chunk));
+      child.stderr.on('data', (chunk) => (out += chunk));
+      const timer = setTimeout(() => child.kill(), 180_000);
+      child.on('close', (status) => {
+        clearTimeout(timer);
+        resolve({ status, out });
+      });
+    });
+  const leftovers = () => fs.readdirSync(temp).filter((name) => name.startsWith('dsh-delegate-setup-'));
+
+  // Stands in for github.com/.../releases/latest/download/dsh-delegate.zip.
+  const server = http.createServer((req, res) => {
+    if (req.url !== '/dsh-delegate.zip') {
+      res.writeHead(404).end('not found');
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'application/zip' });
+    fs.createReadStream(zip).pipe(res);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const run = await runBat(['--no-clients', '--autostart'], { DSH_DELEGATE_ZIP_URL: `${base}/dsh-delegate.zip` });
+    const bridgeCli = path.join(sb.home, 'bridge', 'bin', 'dsh-delegate.js');
+    check('下载最新包、解压、安装，退出码 0', run.status === 0 && fs.existsSync(bridgeCli), `exit ${run.status} ${run.out.trim().slice(-300)}`);
+    check('装完删掉临时目录', leftovers().length === 0, leftovers().join(', '));
+    const vbs = path.join(sb.appdata, 'dsh-delegate', 'daemon.vbs');
+    const launcher = fs.existsSync(vbs) ? fs.readFileSync(vbs, 'utf8') : '';
+    check(
+      '--autostart 跑 ~/.dsh/bridge 里的副本，不指向装完就删的临时目录',
+      launcher.includes(bridgeCli) && !launcher.includes(temp),
+      launcher.split('\n').find((line) => line.includes('shell.Run')) || '(no daemon.vbs)',
+    );
+    const calls = fs.existsSync(syscalls) ? fs.readFileSync(syscalls, 'utf8') : '';
+    check('（测试里 schtasks 只记录、不真的注册）', /\["schtasks","\/create"/.test(calls), calls.trim().slice(0, 200));
+
+    const missing = await runBat([], { DSH_DELEGATE_ZIP_URL: `${base}/missing.zip` });
+    check(
+      '下载失败：退出码 1，提示开代理或改用 DSH_DELEGATE_ZIP，不留临时目录',
+      missing.status === 1 && /Could not download/.test(missing.out) && /DSH_DELEGATE_ZIP=/.test(missing.out) && leftovers().length === 0,
+      `exit ${missing.status} ${missing.out.trim().slice(-200)}`,
+    );
+    const local = await runBat(['--dry-run', '--targets=codex'], { DSH_DELEGATE_ZIP: zip });
+    check(
+      'DSH_DELEGATE_ZIP 装本地包，参数原样传给 install.cmd',
+      local.status === 0 && /dry-run/.test(local.out) && /client:codex/.test(local.out) && !/client:claude-desktop/.test(local.out),
+      `exit ${local.status} ${local.out.trim().slice(-300)}`,
+    );
+    const broken = await runBat([], { DSH_DELEGATE_ZIP: path.join(sb.dir, 'nope.zip') });
+    check('本地包不存在：退出码 1，不留临时目录', broken.status === 1 && leftovers().length === 0, `exit ${broken.status}`);
+  } finally {
+    server.close();
   }
 }
 
@@ -788,6 +943,7 @@ console.log('\n== 插件包里的服务与 lib/ 同步 ==');
   await jobRecoverySuite();
   await quotaSuite();
   await serviceSuite();
+  if (WIN) await batSuite();
   for (const dir of sandboxes) {
     try {
       fs.rmSync(dir, { recursive: true, force: true });

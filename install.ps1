@@ -9,7 +9,8 @@
     Accepts PowerShell-style switches (-DryRun) and the same GNU-style flags as
     install.sh (--dry-run, --targets=...), which are passed through unchanged.
     Double-clicked (install.cmd from Explorer), it waits for Enter at the end so
-    the result stays readable.
+    the result stays readable, unless DSH_DELEGATE_NO_PAUSE is set (the one-file
+    dsh-delegate-install.bat sets it and does the waiting itself).
 
 .EXAMPLE
     .\install.ps1 -DryRun
@@ -48,7 +49,9 @@ function Test-LaunchedFromExplorer {
 }
 
 function Exit-Installer([int]$Code) {
-    if (Test-LaunchedFromExplorer) { Read-Host 'Done. Press Enter to close this window' | Out-Null }
+    if (-not $env:DSH_DELEGATE_NO_PAUSE -and (Test-LaunchedFromExplorer)) {
+        Read-Host 'Done. Press Enter to close this window' | Out-Null
+    }
     exit $Code
 }
 

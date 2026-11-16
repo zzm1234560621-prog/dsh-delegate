@@ -45,7 +45,19 @@ Installing both is recommended: the script sets everything up, and the plugin ke
 
 ### A. Install script
 
-**Download, no git needed**: get `dsh-delegate-v*.zip` from [Releases](https://github.com/zzm1234560621-prog/dsh-delegate/releases/latest) and unzip it. On Windows, double-click `install.cmd` (the window stays open on the result); on macOS / Linux, run `sh install.sh` in the unzipped folder.
+**One-click install, no git needed**: from [Releases](https://github.com/zzm1234560621-prog/dsh-delegate/releases/latest), download:
+
+| System | Download | Then |
+|---|---|---|
+| Windows | `dsh-delegate-install.bat` | Double-click it. It downloads and installs the latest package, deletes the temporary files and keeps the window open on the result |
+| macOS | `dsh-delegate.zip` | Double-click to unzip, then double-click `install.command` inside; it installs in Terminal |
+| Linux | `dsh-delegate.zip` | Unzip it and run `sh install.sh` in the unzipped folder |
+
+- Windows: if the browser says the file isn't commonly downloaded, choose Keep. If double-clicking shows "Windows protected your PC", click More info → Run anyway.
+- If the `.bat` can't download the package (GitHub unreachable): turn on your proxy and run it again, or get `dsh-delegate.zip` another way, run `set DSH_DELEGATE_ZIP=C:\path\to\dsh-delegate.zip` in cmd, then run the `.bat`. The flags below work too, e.g. `dsh-delegate-install.bat --autostart`.
+- If macOS blocks the first double-click ("cannot be opened" / "could not verify the developer"): on macOS 14 and earlier, right-click → Open; from macOS 15, click Open Anyway at the bottom of System Settings → Privacy & Security. Or run `sh install.sh` in Terminal from the unzipped folder, which does the same.
+- There is no standalone Mac installer file: browsers save downloads without the execute permission, so it wouldn't run on double-click. That is why `install.command` ships inside the zip.
+- `dsh-delegate.zip` and `dsh-delegate-v<version>.zip` are the same package. On Windows you can also unzip it and double-click `install.cmd`.
 
 **Or clone with git**, Windows (PowerShell or cmd):
 
