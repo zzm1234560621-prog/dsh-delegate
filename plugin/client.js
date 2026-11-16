@@ -5,11 +5,11 @@ window.__ModuleLoader__.load({
     const h = React.createElement;
 
     const API = 'http://127.0.0.1:7788';
-    const POLL_MS = 4000;
+    const POLL_MS = 6000;
 
     async function get(path) {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 3000);
+      const timer = setTimeout(() => controller.abort(), 15000);
       try {
         const res = await fetch(API + path, { signal: controller.signal });
         if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -42,7 +42,10 @@ window.__ModuleLoader__.load({
             setRuns(list);
             setError('');
           } catch (cause) {
-            if (alive) setError(cause && cause.message ? cause.message : 'unreachable');
+            if (!alive) return;
+            const message = cause && cause.message ? cause.message : '';
+            // Distinguish "the service is overloaded" from "nothing is listening".
+            setError(/abort/i.test(message) || /signal/i.test(message) ? '服务繁忙（响应超时）' : message || '未连接');
           }
         };
         tick();

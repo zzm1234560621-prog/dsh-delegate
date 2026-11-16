@@ -395,6 +395,7 @@
       <span class="pill" id="token-total">tokens —</span>
       <span class="pill" id="more-info"></span>
       <div style="flex:1"></div>
+      <button class="ghost" id="more-runs" hidden>显示更多</button>
       <button class="ghost" id="toggle-finished">显示已结束</button>
       <button class="ghost" id="refresh-runs">立即刷新</button>
     </div>
@@ -546,9 +547,17 @@ function updateCard(card, run, detail) {
   }
 }
 
+let extraCards = 0;
+const detailCache = new Map(); // run id → { detail, at }
+
+function resetExtra() {
+  extraCards = 0;
+  detailCache.clear();
+}
+
 async function loadRuns() {
   try {
-    const data = await api('/api/runs');
+    const data = await api('/api/runs?limit=' + Math.min(500, 24 + extraCards));
     el('running-count').textContent = '运行中 ' + data.running;
     el('total-count').textContent = '共 ' + data.runs.length;
     if (data.storage) {
@@ -582,7 +591,7 @@ async function loadRuns() {
     }
 
     const columns = visibleColumns();
-    const capacity = columns * 2;
+    const capacity = columns * 2 + extraCards;
     const running = data.runs.filter((run) => run.state === 'running');
     const finished = data.runs.filter((run) => run.state !== 'running');
     const ordered = [...(showFinished ? [...running, ...finished] : running)].sort(
@@ -593,18 +602,33 @@ async function loadRuns() {
     el('toggle-finished').textContent = showFinished
       ? '只看运行中'
       : '显示已结束 (' + finished.length + ')';
+    const remaining = ordered.length - capacity;
     el('more-info').textContent =
-      ordered.length > capacity
-        ? '还有 ' + (ordered.length - capacity) + ' 条更早的记录'
+      remaining > 0
+        ? '还有 ' + remaining + ' 条更早的记录'
         : !showFinished && finished.length
           ? '已结束的 ' + finished.length + ' 条已隐藏'
           : '';
+    el('more-runs').hidden = remaining <= 0;
+    el('more-runs').textContent = remaining > 0 ? '显示更多 (' + remaining + ')' : '';
 
     for (const hint of [...list.querySelectorAll('.hint')]) hint.remove();
 
+    // Finished runs never change, so fetch their detail once per run instead of on
+    // every 1.5s poll: 8 cards × 1 request each added up while the box was loaded.
     const details = await Promise.all(
-      shown.map((run) => api('/api/runs/' + encodeURIComponent(run.id)).catch(() => null)),
+      shown.map(async (run) => {
+        const cached = detailCache.get(run.id);
+        if (cached && run.state !== 'running') return cached.detail;
+        if (cached && Date.now() - cached.at < 5000) return cached.detail;
+        const detail = await api('/api/runs/' + encodeURIComponent(run.id)).catch(() => null);
+        if (detail) detailCache.set(run.id, { detail, at: Date.now() });
+        return detail ?? (cached ? cached.detail : null);
+      }),
     );
+    if (detailCache.size > 200) {
+      for (const key of [...detailCache.keys()].slice(0, detailCache.size - 200)) detailCache.delete(key);
+    }
 
     const seen = new Set();
     shown.forEach((run, index) => {
@@ -1318,6 +1342,11 @@ async function load() {
 
 el('refresh').addEventListener('click', () => load().catch(showError));
 el('refresh-runs').addEventListener('click', () => loadRuns());
+el('more-runs').addEventListener('click', async () => {
+  extraCards += Math.max(8, visibleColumns() * 2);
+  await loadRuns();
+});
+
 el('toggle-finished').addEventListener('click', () => {
   showFinished = !showFinished;
   el('toggle-finished').textContent = showFinished ? '只看运行中' : '显示已结束';
