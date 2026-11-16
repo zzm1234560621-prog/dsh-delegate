@@ -161,6 +161,52 @@ function parseTargets(value) {
   return list;
 }
 
+/** headless profile 的 bundle 列表；profile 还没建时返回 null。 */
+function headlessBundles() {
+  const file = path.join(dsh.dshHome(), 'profiles', 'headless', 'package.json');
+  try {
+    const json = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return (json.dsh && json.dsh.profile && json.dsh.profile.bundles) || [];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 当前供应商如果是插件提供的（例如 dsh-opencode-go），headless profile 里必须装它，
+ * 否则派活时会报 unknown provider。装之前什么都没用，这里顺手补上。
+ */
+function ensureProviderPlugin(launch, options = {}) {
+  const config = require('../lib/config');
+  const state = config.state();
+  const provider = state.providers.find((item) => item.id === state.model.provider);
+  if (!provider || !provider.plugin) {
+    return { what: 'provider-plugin', status: 'skip', file: '当前供应商不需要额外插件' };
+  }
+  const bundles = headlessBundles();
+  if (bundles && bundles.includes(provider.plugin)) {
+    return { what: 'provider-plugin', status: 'ok', file: provider.plugin };
+  }
+  const args = ['plugin', '--profile', 'headless', 'add', provider.plugin];
+  if (options.dryRun) {
+    return { what: 'provider-plugin', status: 'would-install', file: `${launch.command} ${args.join(' ')}` };
+  }
+  const result = spawnSync(launch.command, [...(launch.argsPrefix || []), ...args], {
+    encoding: 'utf8',
+    timeout: 180000,
+    shell: process.platform === 'win32' && /\.exe$/i.test(launch.command) ? false : false,
+  });
+  if (result.status === 0) {
+    return { what: 'provider-plugin', status: 'installed', file: provider.plugin };
+  }
+  const tail = `${(result.stdout || '') + (result.stderr || '')}`.trim().split('\n').slice(-1)[0] || '';
+  return {
+    what: 'provider-plugin',
+    status: 'FAILED',
+    file: `请手动运行：dsh plugin --profile headless add ${provider.plugin}${tail ? `（${tail.slice(0, 80)}）` : ''}`,
+  };
+}
+
 async function commandInstall(args) {
   const dryRun = Boolean(args['dry-run']);
   const launch = dsh.discover();
@@ -173,6 +219,7 @@ async function commandInstall(args) {
   if (!dryRun) copyRuntime(bridgeDir());
 
   const results = [];
+  results.push(ensureProviderPlugin(launch, { dryRun }));
 
   if (!dryRun) {
     const ok = await verifyEntry(ctx.mcpPath);
