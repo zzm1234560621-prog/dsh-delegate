@@ -262,6 +262,7 @@
         <label for="provider">模型供应商</label>
         <select id="provider"></select>
         <div class="hint" id="provider-hint"></div>
+        <button class="ghost" id="switch-provider" style="margin-top:8px;">切换到此供应商</button>
       </div>
       <div>
         <label for="model-select">模型</label>
@@ -1519,6 +1520,49 @@ el('refresh-models').addEventListener('click', async () => {
   } else {
     msg.className = 'msg err';
     msg.textContent = '拉取失败：' + ((catalogs.errors && catalogs.errors[id]) || '接口没有返回模型');
+  }
+});
+
+el('switch-provider').addEventListener('click', async () => {
+  const msg = el('model-msg');
+  const providerId = el('provider').value;
+  if (!providerId) {
+    msg.className = 'msg err';
+    msg.textContent = '先选一个供应商';
+    return;
+  }
+  const provider = state.config.providers.find((item) => item.id === providerId);
+  const names = catalogFor(providerId).length ? catalogFor(providerId) : (provider ? provider.models : []);
+  let model = currentModel();
+  // 换供应商时旧模型往往不属于新供应商，自动落到第一个可用模型，避免“保存没反应”
+  if (!model || (names.length && !names.includes(model))) {
+    model = names[0] || '';
+    if (model) {
+      const select = el('model-select');
+      select.value = model;
+      const custom = el('model-custom');
+      if (custom) custom.value = '';
+    }
+  }
+  if (!model) {
+    msg.className = 'msg err';
+    msg.textContent = '这个供应商没有可用模型，先点“刷新模型列表”';
+    return;
+  }
+  msg.className = 'msg';
+  msg.textContent = '切换中…';
+  try {
+    await api('/api/model', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: providerId, model, reasoningEffort: el('effort').value }),
+    });
+    msg.className = 'msg ok';
+    msg.textContent = '已切到 ' + (provider ? provider.name || provider.id : providerId) + ' / ' + model + '，下次派活生效。';
+    await load();
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = cause.message;
   }
 });
 
