@@ -78,6 +78,9 @@
   }
   .banner[hidden] { display: none; }
   .cred-block { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  .cred-block > summary { list-style: none; }
+  .cred-block > summary::-webkit-details-marker { display: none; }
+  .cred-block[open] { padding-bottom: 4px; }
   .modal {
     position: fixed; inset: 0; background: rgba(4,6,10,.72);
     display: flex; align-items: center; justify-content: center; z-index: 50; padding: 24px;
@@ -271,11 +274,11 @@
       </div>
     </div>
 
-    <div class="cred-block" id="cred-block">
-      <div class="row" style="gap:10px; flex-wrap:wrap;">
+    <details class="cred-block" id="cred-block">
+      <summary class="row" style="gap:10px; flex-wrap:wrap; cursor:pointer;">
         <span class="pill" id="cred-state">凭据 —</span>
-        <span class="hint" style="margin:0">headless 只从启动环境、&lt;cwd&gt;/.env、$DSH_HOME/.env 取 key；<b>DSH_ 开头的变量名会被拒绝</b>。</span>
-      </div>
+        <span class="hint" style="margin:0">点开管理 API key（headless 只从启动环境、&lt;cwd&gt;/.env、$DSH_HOME/.env 取；<b>DSH_ 开头的变量名会被拒绝</b>）</span>
+      </summary>
       <div class="grid" style="margin-top:10px;">
         <div><label for="env-name">变量名</label><input id="env-name" placeholder="OPENCODE_GO_ACCOUNT_KEY" /></div>
         <div><label for="env-value">值</label><input id="env-value" type="password" placeholder="sk-… / oc_…" /></div>
@@ -292,7 +295,7 @@
           <tbody id="env-rows"></tbody>
         </table>
       </details>
-    </div>
+    </details>
 
     <div class="row" style="margin-top:14px; gap:8px; flex-wrap:wrap; align-items:center;">
       <button id="save-model">保存模型</button>
