@@ -42,11 +42,12 @@
     "test:regress": "node test/regress.js",
     "test:live": "node test/live.js",
     "test:quota": "node test/quota.js",
-    "test:all": "node test/smoke.js && node test/edge.js && node test/regress.js && node test/quota.js && node test/resume.js",
+    "test:all": "node test/smoke.js && node test/edge.js && node test/regress.js && node test/quota.js && node test/resume.js && node test/accounts.js",
     "sync:plugin": "node -e \"const fs=require('fs');for(const f of fs.readdirSync('lib'))fs.copyFileSync('lib/'+f,'plugin/server/lib/'+f)\"",
     "pack": "node scripts/pack-release.js",
     "test:quota-merge": "node test/quota-merge.js",
-    "test:resume": "node test/resume.js"
+    "test:resume": "node test/resume.js",
+    "test:accounts": "node test/accounts.js"
   },
   "keywords": [
     "mcp",

@@ -306,7 +306,20 @@
     <p class="hint">写入 <span class="mono" id="patch-path"></span> 里的标记块，下次派活生效。</p>
   </section>
 
-  <section id="quota-section">
+  <section>
+    <h2><span class="dot"></span>账号（dsh-opencode-go 内部）</h2>
+    <div class="hint" style="margin-bottom:10px;">供应商只有「OpenCode Go 网关」一个，账号在插件内部切换；这里列出配置里定义的账号。</div>
+    <div class="grid" id="account-rows"><div class="hint">读取中…</div></div>
+    <div class="row" style="margin-top:10px; gap:12px; align-items:center; flex-wrap:wrap;">
+      <label class="hint" style="margin:0; display:flex; align-items:center; gap:6px;">
+        <input type="checkbox" id="account-autoswitch" style="width:auto;" /> 额度出错时自动切换账号
+      </label>
+      <button class="ghost" id="account-refresh">重新读取</button>
+      <span class="msg" id="account-msg" style="margin:0"></span>
+    </div>
+  </section>
+
+<section id="quota-section">
     <h2><span class="dot"></span>额度与派活档位</h2>
     <div class="hint quota-error" id="quota-error" hidden></div>
     <div class="quota-list">
@@ -1056,6 +1069,83 @@ function showQuotaError(cause) {
   }
 }
 
+async function loadAccounts() {
+  const box = el('account-rows');
+  const msg = el('account-msg');
+  try {
+    const data = await api('/api/accounts');
+    if (!data.ok) {
+      box.innerHTML = '';
+      const hint = document.createElement('div');
+      hint.className = 'hint';
+      hint.textContent = data.error || '读不到账号配置';
+      box.appendChild(hint);
+      return;
+    }
+    box.innerHTML = '';
+    for (const account of data.accounts) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.style.cssText = 'gap:10px; align-items:center; flex-wrap:wrap; padding:6px 0; border-bottom:1px dashed var(--line);';
+
+      const name = document.createElement('strong');
+      name.textContent = account.name;
+      name.style.minWidth = '90px';
+
+      const id = document.createElement('span');
+      id.className = 'mono hint';
+      id.style.margin = '0';
+      id.textContent = account.id;
+
+      const env = document.createElement('span');
+      env.className = 'pill';
+      env.textContent = (account.env || '—') + (account.hasKey ? ' · 已设置' : ' · 缺 key');
+      env.className = 'pill ' + (account.hasKey ? 'ok' : 'warn');
+
+      row.append(name, id, env);
+
+      if (account.current) {
+        const badge = document.createElement('span');
+        badge.className = 'pill ok';
+        badge.textContent = '当前使用';
+        row.appendChild(badge);
+      } else {
+        const button = document.createElement('button');
+        button.className = 'ghost';
+        button.textContent = '切换到此账号';
+        button.addEventListener('click', async () => {
+          button.disabled = true;
+          msg.className = 'msg';
+          msg.textContent = '切换中…';
+          try {
+            await api('/api/accounts', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ id: account.id }),
+            });
+            msg.className = 'msg ok';
+            msg.textContent = '已切换到 ' + account.name;
+            await loadAccounts();
+          } catch (cause) {
+            button.disabled = false;
+            msg.className = 'msg err';
+            msg.textContent = cause.message;
+          }
+        });
+        row.appendChild(button);
+      }
+      box.appendChild(row);
+    }
+    el('account-autoswitch').checked = Boolean(data.autoSwitch);
+  } catch (cause) {
+    box.innerHTML = '';
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.textContent = cause.message;
+    box.appendChild(hint);
+  }
+}
+
 async function loadQuota() {
   try {
     const data = await api('/api/quota');
@@ -1347,6 +1437,7 @@ async function load() {
   renderEnv();
   renderClients();
   await loadService();
+  await loadAccounts();
   await loadCatalogs(false);
   await loadRuns();
 }
@@ -1536,6 +1627,24 @@ el('save-settings').addEventListener('click', async () => {
     msg.className = 'msg ok';
     msg.textContent = '已保存，下一次派活就按这个走。';
     await load();
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = cause.message;
+  }
+});
+
+el('account-refresh').addEventListener('click', () => loadAccounts());
+
+el('account-autoswitch').addEventListener('change', async () => {
+  const msg = el('account-msg');
+  try {
+    await api('/api/accounts', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'autoSwitch', enabled: el('account-autoswitch').checked }),
+    });
+    msg.className = 'msg ok';
+    msg.textContent = '已保存自动切换设置';
   } catch (cause) {
     msg.className = 'msg err';
     msg.textContent = cause.message;
