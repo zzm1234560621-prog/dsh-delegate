@@ -191,11 +191,10 @@ function ensureProviderPlugin(launch, options = {}) {
   if (options.dryRun) {
     return { what: 'provider-plugin', status: 'would-install', file: `${launch.command} ${args.join(' ')}` };
   }
-  const result = spawnSync(launch.command, [...(launch.argsPrefix || []), ...args], {
-    encoding: 'utf8',
-    timeout: 180000,
-    shell: process.platform === 'win32' && /\.exe$/i.test(launch.command) ? false : false,
-  });
+  // runDshSync, not a bare spawnSync: the desktop app only runs the CLI with
+  // ELECTRON_RUN_AS_NODE (without it the GUI starts instead), the install must go
+  // into this DSH_HOME, and a Windows dsh.cmd needs cmd.exe.
+  const result = dsh.runDshSync(launch, args, { timeout: 180000 });
   if (result.status === 0) {
     return { what: 'provider-plugin', status: 'installed', file: provider.plugin };
   }

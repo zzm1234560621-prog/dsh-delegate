@@ -232,11 +232,18 @@ dsh plugin --profile <profile> remove dsh-delegate    # 装过插件的话
 - 子代理看不到你和 Claude 的对话，任务描述必须自包含。每次调用默认是新会话，用 `session_id` 续接。
 - DSH 沙箱始终放行系统临时目录（Windows 实测 `%TEMP%`），`write_scope` 管不到那里。别在临时目录里验证写边界。
 - 并发默认不设上限，任务一多要注意内存和模型限流，可以用 `max_concurrency` 限制。
-- Windows 是主要测试平台；macOS / Linux 上的桌面版路径发现还没有在真机上验证过。
+- Windows 是主要测试平台。macOS 上会依次尝试三种方式：
+  1. DSH App 自带的命令行（`<App>.app/Contents/Resources/runtime/cli/bin/dsh`，用它旁边自带的 Node 运行；这个位置来自一位用户在真 Mac 上的安装）；
+  2. 装好的 `dsh` 命令；
+  3. 把 App 本体当 Node 运行。
+
+  这几种方式都还没在真 Mac 上测过。Linux 上的桌面版查找同样没在真机上验证过。
 
 ## 常见问题
 
 **工具列表里没有 `dsh_*`**：完全退出 Claude 桌面版（包括托盘图标）再打开，或新开 Claude Code 会话；还不行就跑 `dsh-delegate doctor`。
+
+**提示找不到 DSH**：用环境变量指定位置：命令行版设 `DSH_DELEGATE_CLI=/path/to/dsh`，桌面版设 `DSH_DELEGATE_APP=/path/to/DSH NEXT(.exe)`。注意，Claude 桌面版、Codex 这类图形界面的客户端读不到在终端里设的变量。
 
 **返回 `MISSING_CREDENTIAL`**：headless 读不到 key，到看板「执行模型与凭据」里配，见「配置模型和 key」。
 

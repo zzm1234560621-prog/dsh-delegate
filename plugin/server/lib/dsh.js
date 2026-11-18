@@ -59,11 +59,11 @@ function isDir(target) {
   }
 }
 
-function which(command) {
+function which(command, extraDirs = []) {
   // Only what spawn() can start: a .ps1 or an extensionless npm shell shim cannot
   // be executed directly on Windows.
   const exts = process.platform === 'win32' ? ['.cmd', '.exe', '.bat'] : [''];
-  const dirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  const dirs = [...(process.env.PATH || '').split(path.delimiter), ...extraDirs].filter(Boolean);
   for (const dir of dirs) {
     for (const ext of exts) {
       const candidate = path.join(dir, command + ext);
@@ -198,9 +198,79 @@ function scannedCandidates() {
   return list;
 }
 
+/** Where a Mac keeps apps: system-wide and per user. */
+function macAppRoots() {
+  return ['/Applications', path.join(os.homedir(), 'Applications')];
+}
+
+/**
+ * The command-line DSH that the macOS app ships, with the Node it runs on:
+ *
+ *   <App>.app/Contents/Resources/runtime/cli/bin/dsh
+ *   <App>.app/Contents/Resources/runtime/[<arch>/]primary-runtime/dependencies/node/bin/node
+ *
+ * (layout reported from a real Mac install; the Windows app has the same Node under
+ * resources/runtime/x64/primary-runtime but no cli folder). On a Mac this comes
+ * before starting the Electron binary as Node: that is not what the app ships for
+ * command-line use, and an app can switch it off.
+ */
+function bundledCli(roots = macAppRoots()) {
+  const apps = [];
+  for (const root of roots) {
+    for (const name of ['DSH NEXT', 'DSH', 'DeepSeek Harness']) apps.push(path.join(root, `${name}.app`));
+    let entries = [];
+    try {
+      entries = fs.readdirSync(root, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory() && entry.name.toLowerCase().endsWith('.app')) apps.push(path.join(root, entry.name));
+    }
+  }
+  for (const app of [...new Set(apps)]) {
+    const runtime = path.join(app, 'Contents', 'Resources', 'runtime');
+    const command = path.join(runtime, 'cli', 'bin', 'dsh');
+    if (!exists(command) || isDir(command)) continue;
+    const nodeDirs = [path.join(runtime, 'primary-runtime'), path.join(runtime, process.arch, 'primary-runtime')]
+      .map((dir) => path.join(dir, 'dependencies', 'node', 'bin'))
+      .filter((dir) => exists(path.join(dir, 'node')));
+    return { kind: 'cli', command, argsPrefix: [], bundled: true, nodeDirs, detail: `${command}（${path.basename(app)} 自带）` };
+  }
+  return null;
+}
+
+/**
+ * Where an npm-installed dsh usually is when PATH does not say: a GUI app (Claude
+ * Desktop, Codex) starts the MCP server with a bare PATH such as /usr/bin:/bin. The
+ * folder of the Node running this server comes first, since npm puts global
+ * commands next to it.
+ */
+function extraCliDirs() {
+  if (process.platform === 'win32') return [];
+  const home = os.homedir();
+  return [
+    path.dirname(process.execPath),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    path.join(home, '.npm-global', 'bin'),
+    path.join(home, '.volta', 'bin'),
+    path.join(home, 'Library', 'pnpm'),
+    path.join(home, '.local', 'share', 'pnpm'),
+    path.join(home, '.local', 'bin'),
+  ];
+}
+
+/** A dsh command on PATH or in the usual places (never our own launcher). */
+function installedCli() {
+  const cli = which('dsh', extraCliDirs());
+  return cli ? { kind: 'cli', command: cli, argsPrefix: [], detail: cli } : null;
+}
+
 /**
  * Resolve how to start DSH.
- * @returns {{kind:'desktop'|'cli', command:string, argsPrefix:string[], detail:string}}
+ * @returns {{kind:'desktop'|'cli', command:string, argsPrefix:string[], detail:string,
+ *            bundled?:boolean, nodeDirs?:string[]}}
  */
 function discover() {
   const explicitApp = process.env.DSH_DELEGATE_APP;
@@ -219,6 +289,23 @@ function discover() {
     };
   }
 
+  const explicitCli = process.env.DSH_DELEGATE_CLI;
+  if (explicitCli) {
+    if (!exists(explicitCli) || isDir(explicitCli)) {
+      const error = new Error(`DSH_DELEGATE_CLI 指向的文件不存在：${explicitCli}`);
+      error.code = 'DSH_NOT_FOUND';
+      throw error;
+    }
+    return { kind: 'cli', command: explicitCli, argsPrefix: [], detail: `env DSH_DELEGATE_CLI=${explicitCli}` };
+  }
+
+  // On a Mac: the app's own command-line DSH, then an installed one; the Electron
+  // binary only as a last resort (see bundledCli).
+  if (process.platform === 'darwin') {
+    const mac = bundledCli() || installedCli();
+    if (mac) return mac;
+  }
+
   for (const candidate of [...desktopCandidates(), ...scannedCandidates()]) {
     if (exists(candidate.exe)) {
       return {
@@ -230,14 +317,13 @@ function discover() {
     }
   }
 
-  const cli = which('dsh');
-  if (cli) {
-    return { kind: 'cli', command: cli, argsPrefix: [], detail: cli };
-  }
+  const cli = installedCli();
+  if (cli) return cli;
 
   const error = new Error(
     '找不到 DSH：既没有桌面版安装，也没有 PATH 上的 dsh 命令。\n' +
-      '  设置 DSH_DELEGATE_APP=/path/to/DSH NEXT(.exe) 指向桌面版可执行文件，或安装 @deepseek-ai/dsh。',
+      '  设置 DSH_DELEGATE_APP=/path/to/DSH NEXT(.exe) 指向桌面版可执行文件，' +
+      '或 DSH_DELEGATE_CLI=/path/to/dsh 指向命令行版，或安装 @deepseek-ai/dsh。',
   );
   error.code = 'DSH_NOT_FOUND';
   throw error;
@@ -284,10 +370,28 @@ function spawnDsh(launch, args, options) {
   return spawnCommand(launch.command, args, options);
 }
 
+/**
+ * Environment for a DSH child process. The desktop app runs as Node. A command-line
+ * DSH starts with `#!/usr/bin/env node`, and a GUI app (Claude Desktop, Codex)
+ * starts the MCP server with a bare PATH, so on macOS / Linux the CLI's Node goes
+ * first: the app's own Node for the CLI it ships, the CLI's own folder (where npm
+ * installs Node too). The Node running this server comes last, only as a fallback:
+ * the CLI may need a newer one.
+ */
+function childEnv(launch, base = process.env, platform = process.platform) {
+  const env = { ...base, DSH_HOME: dshHome() };
+  if (launch.kind === 'desktop') env.ELECTRON_RUN_AS_NODE = '1';
+  if (launch.kind === 'cli' && platform !== 'win32') {
+    const current = (base.PATH || '').split(':').filter(Boolean);
+    const dirs = [...(launch.nodeDirs || []), path.dirname(launch.command), ...current, path.dirname(process.execPath)];
+    env.PATH = [...new Set(dirs)].join(':');
+  }
+  return env;
+}
+
 /** Run a DSH CLI command (e.g. `plugin add`) to completion. */
 function runDshSync(launch, args, options = {}) {
-  const env = { ...process.env, DSH_HOME: dshHome() };
-  if (launch.kind === 'desktop') env.ELECTRON_RUN_AS_NODE = '1';
+  const env = childEnv(launch);
   return spawnSyncCommand(launch.command, [...launch.argsPrefix, ...args], {
     encoding: 'utf8',
     windowsHide: true,
@@ -298,11 +402,13 @@ function runDshSync(launch, args, options = {}) {
 
 function installCommand(launch) {
   if (!launch) return null;
+  const quote = process.platform === 'win32' ? '"' : "'";
   if (launch.kind === 'desktop') {
-    const quote = process.platform === 'win32' ? '"' : "'";
     return `${quote}${launch.command}${quote} --expose-internals ${quote}${launch.argsPrefix[1]}${quote} --profile headless`;
   }
-  return `${launch.command} --profile headless`;
+  // e.g. /Applications/DeepSeek Harness.app/…/dsh
+  const command = /\s/.test(launch.command) ? `${quote}${launch.command}${quote}` : launch.command;
+  return `${command} --profile headless`;
 }
 
 /**
@@ -427,8 +533,7 @@ function runTask(input) {
     if (opts.sessionId) args.push('--session-id', String(opts.sessionId));
     args.push('-');
 
-    const env = { ...process.env, DSH_HOME: dshHome() };
-    if (launch.kind === 'desktop') env.ELECTRON_RUN_AS_NODE = '1';
+    const env = childEnv(launch);
 
     let child;
     try {
@@ -620,6 +725,8 @@ async function mapLimit(items, limit, fn) {
 module.exports = {
   dshHome,
   discover,
+  bundledCli,
+  childEnv,
   installCommand,
   runTask,
   runDshSync,

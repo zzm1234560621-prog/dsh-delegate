@@ -587,6 +587,87 @@ console.log('\n== 发布包：换行符由 .gitattributes 固定 ==');
   }
 }
 
+// ---------------------------------------------------------------- macOS discovery
+
+console.log('\n== macOS：优先用 App 自带的命令行 ==');
+{
+  const dshLib = require(path.join(ROOT, 'lib', 'dsh.js'));
+  const agentsLib = require(path.join(ROOT, 'lib', 'agents.js'));
+  const sb = sandbox('macapp');
+  const apps = path.join(sb.dir, 'Applications');
+  const runtime = path.join(apps, 'DeepSeek Harness.app', 'Contents', 'Resources', 'runtime');
+  const cliFile = path.join(runtime, 'cli', 'bin', 'dsh');
+  const nodeDir = path.join(runtime, 'primary-runtime', 'dependencies', 'node', 'bin');
+  fs.mkdirSync(path.join(apps, 'Other.app', 'Contents', 'Resources', 'runtime'), { recursive: true });
+  check('没有自带命令行的 App 不算', dshLib.bundledCli([apps]) === null);
+
+  for (const dir of [path.dirname(cliFile), nodeDir]) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(cliFile, '#!/usr/bin/env node\n');
+  fs.writeFileSync(path.join(nodeDir, 'node'), '');
+  const found = dshLib.bundledCli([apps]);
+  check(
+    '找到 DeepSeek Harness.app 里的 runtime/cli/bin/dsh 和它旁边的 Node',
+    Boolean(found) && found.kind === 'cli' && found.bundled === true && found.command === cliFile && found.nodeDirs[0] === nodeDir,
+    JSON.stringify(found),
+  );
+
+  const env = dshLib.childEnv(found, { PATH: '/usr/bin:/bin' }, 'darwin');
+  check(
+    '运行自带命令行时，PATH 最前面是它的 Node（图形界面的客户端只给 /usr/bin:/bin）',
+    env.PATH.startsWith(`${nodeDir}:${path.dirname(cliFile)}:/usr/bin:/bin`) && !env.ELECTRON_RUN_AS_NODE,
+    env.PATH,
+  );
+  const npmEnv = dshLib.childEnv({ kind: 'cli', command: '/opt/homebrew/bin/dsh', argsPrefix: [] }, { PATH: '/usr/bin:/bin' }, 'darwin');
+  check('npm 装的 dsh：它所在的目录排最前（npm 把 node 装在同一处）', npmEnv.PATH.startsWith('/opt/homebrew/bin:/usr/bin:/bin'), npmEnv.PATH);
+  const desktopEnv = dshLib.childEnv({ kind: 'desktop', command: 'x', argsPrefix: [] }, { PATH: 'P' }, 'darwin');
+  const winEnv = dshLib.childEnv({ kind: 'cli', command: 'C:\\npm\\dsh.cmd', argsPrefix: [] }, { PATH: 'P' }, 'win32');
+  check('桌面版照旧以 Node 方式运行；Windows 上 PATH 不动', desktopEnv.ELECTRON_RUN_AS_NODE === '1' && desktopEnv.PATH === 'P' && winEnv.PATH === 'P');
+
+  const shim = agentsLib.shimContent(found, '/Users/me/.dsh', 'darwin');
+  check(
+    '为自带命令行生成的 dsh 启动器带上它的 Node，路径加了引号',
+    shim.includes(`export PATH='${nodeDir}'"\${PATH:+:$PATH}"`) && shim.includes(`exec '${cliFile}' "$@"`) && shim.includes('dsh-delegate shim'),
+    shim,
+  );
+  const shims = nodeEval(
+    sb,
+    `const a=require(${req('agents.js')});const h=${JSON.stringify(sb.home)};` +
+      `console.log(a.installShim(${JSON.stringify(found)},h,{dryRun:true}).status,` +
+      `a.installShim({kind:'cli',command:'/opt/homebrew/bin/dsh',argsPrefix:[]},h,{dryRun:true}).status)`,
+  );
+  check('自带命令行不在 PATH 上，照样生成启动器；npm 装的 dsh 不覆盖', shims.stdout.trim() === 'would-write skipped', shims.stdout + shims.stderr);
+
+  const explicit = nodeEval(sb, `const l=require(${req('dsh.js')}).discover();console.log(l.kind+'|'+l.command)`, { DSH_DELEGATE_CLI: cliFile });
+  check('DSH_DELEGATE_CLI 可以直接指定命令行版', explicit.stdout.trim() === `cli|${cliFile}`, explicit.stdout + explicit.stderr);
+  const missing = nodeEval(sb, `try{require(${req('dsh.js')}).discover()}catch(e){console.log(e.code)}`, {
+    DSH_DELEGATE_CLI: path.join(sb.dir, 'nope'),
+  });
+  check('DSH_DELEGATE_CLI 指向不存在的文件时报 DSH_NOT_FOUND', missing.stdout.trim() === 'DSH_NOT_FOUND', missing.stdout + missing.stderr);
+}
+
+console.log('\n== 安装时补装供应商插件：按 DSH 的启动方式运行 ==');
+{
+  const sb = sandbox('provider');
+  const profile = path.join(sb.home, 'profiles', 'headless');
+  fs.mkdirSync(profile, { recursive: true });
+  fs.writeFileSync(
+    path.join(profile, 'cordis.patch.yml'),
+    '- id: agent-default-model\n  config:\n    provider: dsh-opencode-go\n    model: deepseek-v4.1-flash\n',
+  );
+  fs.writeFileSync(path.join(profile, 'package.json'), JSON.stringify({ dsh: { profile: { bundles: [] } } }));
+  const log = path.join(sb.dir, 'fake-dsh.log');
+  const run = cli(sb, ['install', '--no-clients'], { ...FAKE_DESKTOP, FAKE_DSH_LOG: log });
+  const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line)) : [];
+  const add = calls.find((call) => call.args.join(' ') === 'plugin --profile headless add dsh-opencode-go');
+  check(
+    '桌面版带着 ELECTRON_RUN_AS_NODE 和 DSH_HOME 运行 plugin add（否则会打开图形界面）',
+    Boolean(add) && add.electron === '1' && add.dshHome === sb.home,
+    JSON.stringify(calls).slice(0, 300),
+  );
+  const row = run.stdout.split('\n').find((line) => line.includes('provider-plugin')) || '';
+  check('安装结果里这一步是 installed', /provider-plugin\s+installed/.test(row), row || run.stderr.trim().slice(0, 200));
+}
+
 // ---------------------------------------------------------------- one-file installers
 
 /** A POSIX sh for the macOS / Linux scripts: /bin/sh, or the one Git for Windows ships. */

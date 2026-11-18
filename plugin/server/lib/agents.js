@@ -64,13 +64,19 @@ function shimTarget() {
   return path.join(os.homedir(), '.local', 'bin', 'dsh');
 }
 
-function shimContent(launch, dshHome) {
-  if (process.platform !== 'win32') {
-    const body =
+function shimContent(launch, dshHome, platform = process.platform) {
+  if (platform !== 'win32') {
+    const lines = ['#!/bin/sh', '# dsh-delegate shim (generated; do not edit)', `export DSH_HOME=${quote(dshHome)}`];
+    // The CLI a Mac app ships runs on the Node next to it.
+    if (launch.nodeDirs && launch.nodeDirs.length) {
+      lines.push(`export PATH=${quote(launch.nodeDirs.join(':'))}"\${PATH:+:$PATH}"`);
+    }
+    lines.push(
       launch.kind === 'desktop'
         ? `ELECTRON_RUN_AS_NODE=1 exec ${quote(launch.command)} --expose-internals ${quote(launch.argsPrefix[1])} "$@"`
-        : `exec ${quote(launch.command)} "$@"`;
-    return ['#!/bin/sh', '# dsh-delegate shim (generated; do not edit)', `export DSH_HOME=${quote(dshHome)}`, body, ''].join('\n');
+        : `exec ${quote(launch.command)} "$@"`,
+    );
+    return [...lines, ''].join('\n');
   }
   const lines = [
     '@echo off',
@@ -93,10 +99,11 @@ function quote(value) {
 }
 
 function installShim(launch, dshHome, options) {
-  // The launcher exists so desktop-only installs get a `dsh` command. When a real
-  // CLI is already on PATH (npm i -g @deepseek-ai/dsh), writing one would shadow it —
-  // on Windows it would even replace npm's own dsh.cmd with a file that calls itself.
-  if (launch.kind === 'cli') {
+  // The launcher exists so app-only installs get a `dsh` command: the desktop app, or
+  // the CLI a Mac app keeps inside its bundle. When a real CLI is already installed
+  // (npm i -g @deepseek-ai/dsh), writing one would shadow it — on Windows it would
+  // even replace npm's own dsh.cmd with a file that calls itself.
+  if (launch.kind === 'cli' && !launch.bundled) {
     return { file: launch.command, status: 'skipped', detail: `已有 dsh 命令：${launch.command}` };
   }
   const file = shimTarget();
@@ -174,6 +181,7 @@ function removeInstructions(dshHome) {
 
 module.exports = {
   installShim,
+  shimContent,
   removeShim,
   installSkill,
   removeSkill,
