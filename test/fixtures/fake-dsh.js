@@ -8,6 +8,13 @@
  */
 
 const args = process.argv.slice(2);
+// FAKE_DSH_LOG=<file>: record each call's arguments and how it was launched.
+if (process.env.FAKE_DSH_LOG) {
+  require('node:fs').appendFileSync(
+    process.env.FAKE_DSH_LOG,
+    `${JSON.stringify({ args, electron: process.env.ELECTRON_RUN_AS_NODE || null, dshHome: process.env.DSH_HOME || null })}\n`,
+  );
+}
 let input = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk) => {

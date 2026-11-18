@@ -234,11 +234,18 @@ Uninstall removes the skill, the instruction block, the launcher it created, the
 - The subagent can't see your conversation with Claude, so the task has to stand on its own. Each call starts a new session unless you pass `session_id`.
 - The DSH sandbox always allows writes to the system temp directory (verified on Windows with `%TEMP%`); `write_scope` doesn't cover it. Don't test write scopes inside a temp directory.
 - Concurrency is unlimited by default. With many tasks, keep an eye on memory and model rate limits; `max_concurrency` caps it.
-- Windows is the main test platform. Desktop-app discovery on macOS / Linux hasn't been verified on real machines yet.
+- Windows is the main test platform. On macOS, three ways are tried in order:
+  1. The command-line DSH that ships inside the DSH app (`<App>.app/Contents/Resources/runtime/cli/bin/dsh`), run on the Node bundled next to it. This location comes from a user's install on a real Mac.
+  2. An installed `dsh` command.
+  3. Running the app binary itself as Node.
+
+  None of these has been tested on a real Mac yet. Desktop-app discovery on Linux hasn't been verified on a real machine either.
 
 ## FAQ
 
 **No `dsh_*` tools in the list**: fully quit Claude Desktop (including the tray icon) and reopen it, or start a new Claude Code session. If they're still missing, run `dsh-delegate doctor`.
+
+**DSH not found**: point to it with an environment variable: `DSH_DELEGATE_CLI=/path/to/dsh` for the command-line DSH, or `DSH_DELEGATE_APP=/path/to/DSH NEXT(.exe)` for the desktop app. GUI clients such as Claude Desktop and Codex don't see variables set in a terminal.
 
 **`MISSING_CREDENTIAL`**: headless DSH can't find a key; set one in the dashboard, see [Model and key setup](#model-and-key-setup).
 
