@@ -230,7 +230,7 @@ dsh-delegate quota             # 查看 Claude / Codex 额度和当前档位
 
 服务只监听 `127.0.0.1`，只接受本机进程、本机页面（看板自己、`dsh web`）和 DSH 桌面版的请求；其他网站从浏览器发来的请求一律返回 403。如果确实需要放行别的来源，可以用环境变量 `DSH_DELEGATE_ALLOWED_ORIGINS` 追加。
 
-服务不随 Claude 或 DSH 启动。要它一直在，就开自启：`dsh-delegate autostart on`。Windows 上用的是计划任务，登录时启动，之后每 5 分钟检查一次，服务停了会自动拉起；macOS 的 LaunchAgent 在服务异常退出时重启它；Linux 只在登录时启动。服务每次启动和退出都记录在 `$DSH_HOME/delegate-daemon.log`。
+装了 DSH 插件时，DSH 启动会顺带拉起服务；否则服务不随 Claude 或 DSH 启动。要它一直在，就开自启：`dsh-delegate autostart on`。重装或升级时，如果服务还在跑旧版本，安装会自动把它换成新版本，端口不变；看板上的「重启服务」也一样，由新进程接上同一个端口。Windows 上用的是计划任务，登录时启动，之后每 5 分钟检查一次，服务停了会自动拉起；macOS 的 LaunchAgent 在服务异常退出时重启它；Linux 只在登录时启动。服务每次启动和退出都记录在 `$DSH_HOME/delegate-daemon.log`。
 
 ## 自检与测试
 

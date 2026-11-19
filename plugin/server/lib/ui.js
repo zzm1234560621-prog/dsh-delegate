@@ -275,6 +275,7 @@ async function handleApi(req, res, pathname) {
     return json(res, 200, {
       running: daemon.running,
       pid: daemon.pid || null,
+      version: daemon.version || null,
       port: daemon.port || config.readSettings().daemonPort,
       ui: daemon.ui !== undefined ? daemon.ui : null,
       url: daemon.url || null,
@@ -305,7 +306,9 @@ async function handleApi(req, res, pathname) {
     const settings = config.readSettings();
     const { spawn } = require('node:child_process');
     const cli = path.join(__dirname, '..', 'bin', 'dsh-delegate.js');
-    const args = [cli, 'daemon', `--port=${settings.daemonPort}`];
+    // --replace: the new process waits for this one to exit. Without it, it saw this
+    // service still running, gave up, and the port stayed empty until the watchdog.
+    const args = [cli, 'daemon', `--replace=${process.pid}`, `--port=${settings.daemonPort}`];
     if (!settings.daemonUi) args.push('--no-ui');
     try {
       spawn(process.execPath, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref();

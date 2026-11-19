@@ -230,6 +230,14 @@ async function commandInstall(args) {
     results.push({ what: 'verify', status: ok ? 'ok' : 'FAILED', file: ok ? ctx.mcpPath : `${ctx.mcpPath}（没有响应 MCP 握手）` });
     if (!ok) process.exitCode = 1;
   }
+  // A running service keeps the code it started with: move it to this version.
+  const service = await require('../lib/daemon').restartIfOutdated({
+    version: pkg.version,
+    node: process.execPath,
+    cli: ctx.cliPath,
+    dryRun,
+  });
+  if (service.status !== 'not-running') results.push({ what: 'service', ...service });
   results.push({ what: 'shim', ...agents.installShim(launch, ctx.dshHome, { dryRun }) });
   for (const item of agents.installSkill(ctx.dshHome, { dryRun })) results.push({ what: 'skill', ...item });
   for (const item of agents.installInstructions(ctx.dshHome, { dryRun })) results.push({ what: 'instructions', ...item });
@@ -544,6 +552,9 @@ async function commandUi(args) {
 }
 
 async function commandDaemon(args) {
+  // --replace=<pid>: this start replaces that process (a restart). Let it go first;
+  // otherwise it still looks like the running service and this start gives up.
+  if (args.replace) await require('../lib/daemon').waitForExit(Number(args.replace));
   const settings = require('../lib/config').readSettings();
   const port = Number(args.port) || settings.daemonPort || 7788;
   const withUi = args['no-ui'] ? false : args.ui ? true : settings.daemonUi !== false;
