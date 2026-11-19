@@ -34,14 +34,19 @@ Claude Desktop / Claude Code / Codex
 
 Both ways do the same job: connect Claude Desktop, Claude Code and Codex to your local DSH. DSH's own subagents use its built-in subagent tools and don't go through this project.
 
-| | A. Install script | B. DSH plugin |
-|---|---|---|
-| Wire the three clients to DSH (MCP config) | ✓ once, at install | ✓ checked on every DSH start, written only if different |
-| Skill and global delegation rules (teach Claude what to delegate) | ✓ | — |
-| `dsh` command-line launcher | ✓ | — |
-| Delegation panel above the DSH composer | — | ✓ |
+Both ways install the same things; pick either one:
 
-Installing both is recommended: the script sets everything up, and the plugin keeps the configs in line afterwards and adds the panel. The plugin prefers the runtime the script deployed.
+- **A. Install package**: sets up everything and adds the plugin to the DSH desktop app. The plugin can only be added while DSH isn't running. If DSH is running, quit it and run the install again, or install the plugin from the DSH plugin market.
+- **B. DSH plugin**: install it from the DSH plugin market. When DSH starts, the plugin installs the same set from the runtime it carries, then starts the local service.
+
+The full set:
+- the MCP entries of the three clients;
+- the skill and delegation rules that teach Claude what to delegate;
+- the `dsh` command-line launcher;
+- the local service (dashboard, key setup page);
+- the delegation panel above the DSH composer.
+
+Both share the runtime in `~/.dsh/bridge`, and the newer version wins. On every DSH start the plugin also re-checks the client configs.
 
 ### A. Install script
 
@@ -97,7 +102,25 @@ Then **fully quit and reopen Claude Desktop**, or start a new Claude Code sessio
 dsh plugin --profile <profile> add "file:/path/to/dsh-delegate/plugin"
 ```
 
-Restart that profile. From then on, every DSH start checks the three clients' MCP configs and writes only when one differs, with a backup first. `node` must be on PATH. The delegation panel shows the local service's status and the tasks Claude / Codex delegated; DSH's own subagents don't appear there. Set `wireClients: false` in the plugin config to keep it away from external clients.
+Or search for dsh-delegate in the DSH plugin market. Restart DSH after installing.
+
+On its first start the plugin runs the installer from the runtime it carries, so you get the same result as A. On every later start it:
+- reinstalls only when the plugin is newer than `~/.dsh/bridge`;
+- otherwise only re-checks the three clients' configs, writing (after a backup) only when one differs;
+- starts the local service if it isn't running, since the panel and the dashboard need it.
+
+The plugin looks for Node in this order: `DSH_DELEGATE_NODE`, `node` on PATH, then the Node that ships with DSH. So it works without Node.js installed. Each run is logged to `~/.dsh/delegate-plugin.log`.
+
+The delegation panel shows the local service's status and the tasks Claude / Codex delegated; DSH's own subagents don't appear there.
+
+Plugin settings (in DSH's plugin settings):
+
+| Setting | Default | Effect |
+|---|---|---|
+| `wireClients` | `true` | Write the Claude Desktop, Claude Code and Codex entries |
+| `startService` | `true` | Start the local service with DSH |
+| `autostart` | `false` | Start the service at login and restart it if it stops, like `--autostart` |
+| `usageHooks` | `false` | Quota reminders in Claude Code, like `--usage-hooks` |
 
 ### What the installer touches
 

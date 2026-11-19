@@ -1,0 +1,1830 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dsh-delegate · 本机 DSH 委派配置</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e222b;
+    --line: #2a2f3a;
+    --text: #e6e8ee;
+    --muted: #8b93a7;
+    --accent: #4c8dff;
+    --ok: #3ecf8e;
+    --warn: #f0b429;
+    --err: #f45b69;
+  }
+  * { box-sizing: border-box; }
+  html { overflow-y: auto; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text); overflow-y: auto;
+    font: 14px/1.6 "Segoe UI", system-ui, -apple-system, "Microsoft YaHei", sans-serif;
+  }
+  header {
+    padding: 20px 28px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  h1 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: .2px; }
+  .tag { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; }
+  main { width: 100%; max-width: none; margin: 0; padding: 18px 28px 60px; display: grid; gap: 16px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+  section .grid { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  section h2 { margin: 0 0 12px; font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; }
+  section h2 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  input, select, textarea {
+    width: 100%; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit;
+  }
+  input:focus, select:focus, textarea:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  .row { display: flex; gap: 8px; align-items: center; }
+  button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+    padding: 8px 14px; font: inherit; cursor: pointer; white-space: nowrap;
+  }
+  button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  button:disabled { opacity: .55; cursor: default; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; }
+  .pill { font-size: 11px; border-radius: 999px; padding: 1px 8px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.ok { color: var(--ok); border-color: #245c44; }
+  .pill.warn { color: var(--warn); border-color: #5c4a1e; }
+  .pill.err { color: var(--err); border-color: #5c2630; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  pre {
+    background: #0b0d11; border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px; overflow: auto; max-height: 320px; margin: 10px 0 0;
+    font-family: ui-monospace, Consolas, monospace; font-size: 12px; white-space: pre-wrap;
+  }
+  .kv { display: grid; grid-template-columns: 120px 1fr; gap: 4px 12px; font-size: 13px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; word-break: break-all; }
+  .msg { margin-top: 10px; font-size: 12px; }
+  .msg.ok { color: var(--ok); } .msg.err { color: var(--err); }
+  @keyframes flash { 0%,100% { box-shadow: none; } 50% { box-shadow: 0 0 0 2px var(--accent); } }
+  section.flash { animation: flash 1.1s ease-in-out 2; }
+  .banner {
+    display: flex; align-items: center; gap: 12px; justify-content: space-between;
+    background: #3a2a12; border: 1px solid #6b4a1c; color: #ffd48a;
+    border-radius: 10px; padding: 10px 14px; font-size: 13px;
+  }
+  .banner[hidden] { display: none; }
+  .cred-block { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  .cred-block > summary { list-style: none; }
+  .cred-block > summary::-webkit-details-marker { display: none; }
+  .cred-block[open] { padding-bottom: 4px; }
+  .modal {
+    position: fixed; inset: 0; background: rgba(4,6,10,.72);
+    display: flex; align-items: center; justify-content: center; z-index: 50; padding: 24px;
+  }
+  .modal[hidden] { display: none; }
+  .modal-card {
+    width: min(980px, 96vw); height: min(82vh, 900px); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 14px; display: flex; flex-direction: column; overflow: hidden;
+  }
+  .modal-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 14px 18px; border-bottom: 1px solid var(--line);
+  }
+  .modal-title { font-weight: 600; }
+  .modal-meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .modal-body { flex: 1; min-height: 0; padding: 16px 18px 24px; overflow: auto; overscroll-behavior: auto; }
+  .modal-body pre { max-height: 260px; overflow: auto; }
+  .conv-turn {
+    color: var(--warn); font-size: 11px; letter-spacing: .4px; text-transform: uppercase;
+    margin: 18px 0 8px; border-top: 1px dashed var(--line); padding-top: 10px;
+  }
+  .conv-text { white-space: pre-wrap; margin: 8px 0 12px; line-height: 1.65; }
+  .conv-think { margin: 8px 0; border: 1px dashed var(--line); border-radius: 8px; background: #14161c; }
+  .conv-think summary { cursor: pointer; padding: 6px 10px; font-size: 12px; color: var(--muted); list-style: none; }
+  .conv-think pre { margin: 0; padding: 8px 10px; border-top: 1px dashed var(--line); white-space: pre-wrap; color: #97a0b5; font-size: 12px; }
+  .conv-tool { margin: 8px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+  .conv-tool summary {
+    cursor: pointer; padding: 7px 10px; font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px; color: #8ab4ff; list-style: none;
+  }
+  .conv-tool summary::-webkit-details-marker { display: none; }
+  .conv-tool pre {
+    margin: 0; padding: 8px 10px; border-top: 1px solid var(--line);
+    font-family: ui-monospace, Consolas, monospace; font-size: 12px; white-space: pre-wrap; color: #c8cede;
+  }
+  .conv-result { margin: 6px 0 12px; }
+  .conv-result pre {
+    margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+    background: #0b0d11; font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+    white-space: pre-wrap; color: #b9c2d6;
+  }
+  .runs {
+    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 10px;
+  }
+  @media (max-width: 1500px) { .runs { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+  @media (max-width: 1050px) { .runs { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  @media (max-width: 760px) { .runs { grid-template-columns: repeat(1, minmax(0, 1fr)); } }
+  .run {
+    border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2);
+    padding: 9px 10px; height: 230px; display: flex; flex-direction: column; gap: 6px;
+    min-width: 0; overflow: hidden;
+  }
+  .run.running { border-color: #2f6b52; box-shadow: inset 0 0 0 1px rgba(62,207,142,.15); }
+  .run.running .pill.ok { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+  .run.failed { border-color: #5c2630; }
+  .run-head { display: flex; gap: 6px; align-items: center; min-width: 0; }
+  .run-title {
+    font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    flex: 1; min-width: 0;
+  }
+  .run-meta { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .run-events {
+    flex: 1; min-height: 0; overflow: hidden; border-top: 1px dashed var(--line); padding-top: 6px;
+    font-family: ui-monospace, Consolas, monospace; font-size: 11px; line-height: 1.55;
+    color: #c8cede; display: flex; flex-direction: column; justify-content: flex-end;
+  }
+  .run-events > div {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.55;
+  }
+  .run-events .tool { color: #8ab4ff; }
+  .run-events .turn { color: var(--warn); }
+  .run-events .text { color: #b9c2d6; }
+  .run-events .result { color: #7fd6a8; opacity: .85; }
+  .quota-error { margin: 0 0 10px; }
+  .quota-error[hidden] { display: none; }
+  .quota-row { border-top: 1px dashed var(--line); padding: 12px 0; }
+  .quota-row:first-child { border-top: 0; padding-top: 2px; }
+  .quota-row-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .quota-name { font-weight: 600; }
+  .quota-fresh { margin: 0 0 0 auto; font-size: 11px; }
+  .quota-window {
+    display: grid; grid-template-columns: 52px 44px minmax(80px, 1fr) auto;
+    gap: 8px; align-items: center; margin-top: 8px; font-size: 12px;
+  }
+  .quota-window-name { color: var(--muted); }
+  .quota-window-pct { font-variant-numeric: tabular-nums; text-align: right; }
+  .quota-bar {
+    height: 6px; border-radius: 999px; background: var(--panel-2);
+    border: 1px solid var(--line); overflow: hidden;
+  }
+  .quota-bar-fill { height: 100%; background: var(--ok); border-radius: 999px; transition: width .3s ease; }
+  .quota-bar-fill.quota-warn { background: var(--warn); }
+  .quota-bar-fill.quota-danger { background: var(--err); }
+  .quota-reset { color: var(--muted); white-space: nowrap; }
+  .quota-limit {
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    margin-top: 8px; font-size: 12px;
+  }
+  .quota-limit-name { color: var(--err); font-weight: 600; }
+  .pill.quota-badge-critical {
+    color: #fff; background: rgba(244,91,105,.24); border-color: var(--err);
+    box-shadow: 0 0 0 1px rgba(244,91,105,.35);
+  }
+  .quota-thresholds {
+    display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
+    margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line);
+  }
+  .quota-field { width: 110px; }
+  .quota-thresholds .msg { margin: 0 0 9px; }
+  @media (max-width: 720px) {
+    .quota-window { grid-template-columns: 52px 44px 1fr; }
+    .quota-reset { grid-column: 1 / -1; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>dsh-delegate</h1>
+  <span class="tag" id="dsh-tag">正在检测 DSH…</span>
+  <span class="tag mono" id="node-tag"></span>
+  <div style="flex:1"></div>
+  <button class="ghost" id="refresh">刷新状态</button>
+</header>
+
+<main>
+  <div class="banner" id="conn-banner" hidden>
+    <span>服务未连接，正在自动重试…（数据仍在磁盘上，连上即恢复）</span>
+    <button class="ghost" id="conn-retry">立即重试</button>
+  </div>
+  <section>
+    <h2><span class="dot"></span>执行环境</h2>
+    <dl class="kv" id="env-kv"></dl>
+    <p class="hint">headless profile 是最瘦的执行配置：只有 base + headless（外加你选的模型插件），没有 GUI / 市场 / 桌面插件。</p>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>服务与自启动</h2>
+    <div class="row" style="gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+      <span class="pill" id="svc-state">检测中…</span>
+      <span class="pill mono" id="svc-detail"></span>
+      <span class="pill" id="svc-autostart">自启动 —</span>
+    </div>
+    <div class="grid">
+      <div>
+        <label for="svc-mode">启动模式</label>
+        <select id="svc-mode">
+          <option value="ui">服务 + 看板</option>
+          <option value="api">仅服务（不启动看板）</option>
+        </select>
+        <div class="hint">「仅服务」时 /api/* 仍可用，只是没有网页看板。</div>
+      </div>
+      <div>
+        <label for="svc-port">端口</label>
+        <input id="svc-port" type="number" min="1024" max="65535" step="1" />
+      </div>
+      <div>
+        <label>登录自启动</label>
+        <select id="svc-autostart-toggle">
+          <option value="off">关闭</option>
+          <option value="on">开启（开机即起服务，按上面模式）</option>
+        </select>
+        <div class="hint">Windows 用计划任务：登录时启动，之后每 5 分钟检查一次，服务停了会自动拉起；macOS 用 LaunchAgent（异常退出自动重启）；Linux 用 XDG autostart（仅登录时）。启动和退出记录在 $DSH_HOME/delegate-daemon.log。</div>
+      </div>
+      <div style="display:flex; align-items:flex-end; gap:8px;">
+        <button id="svc-save">保存</button>
+        <button class="ghost" id="svc-restart">重启服务</button>
+      </div>
+    </div>
+    <div class="msg" id="svc-msg"></div>
+    <p class="hint">状态文件 <span class="mono" id="svc-statefile"></span>；改模式/端口后需要重启服务才生效。</p>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>执行模型与凭据</h2>
+    <div class="grid">
+      <div>
+        <label for="provider">模型供应商</label>
+        <select id="provider"></select>
+        <div class="hint" id="provider-hint"></div>
+        <button class="ghost" id="switch-provider" style="margin-top:8px;">切换到此供应商</button>
+      </div>
+      <div>
+        <label for="model-select">模型</label>
+        <select id="model-select"></select>
+        <input id="model-custom" placeholder="自定义模型 id，例如 gpt-5.5" style="display:none; margin-top:6px" />
+      </div>
+      <div>
+        <label for="effort">思考强度</label>
+        <select id="effort"></select>
+      </div>
+    </div>
+
+    <details class="cred-block" id="cred-block">
+      <summary class="row" style="gap:10px; flex-wrap:wrap; cursor:pointer;">
+        <span class="pill" id="cred-state">凭据 —</span>
+        <span class="hint" style="margin:0">点开管理 API key（headless 只从启动环境、&lt;cwd&gt;/.env、$DSH_HOME/.env 取；<b>DSH_ 开头的变量名会被拒绝</b>）</span>
+      </summary>
+      <div class="grid" style="margin-top:10px;">
+        <div><label for="env-name">变量名</label><input id="env-name" placeholder="OPENCODE_GO_ACCOUNT_KEY" /></div>
+        <div><label for="env-value">值</label><input id="env-value" type="password" placeholder="sk-… / oc_…" /></div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button id="save-env">写入 .env</button>
+        <button class="ghost" id="fill-env">用当前供应商的变量名</button>
+      </div>
+      <div class="msg" id="env-msg"></div>
+      <details style="margin-top:6px;">
+        <summary class="hint">已保存的变量（点开）</summary>
+        <table>
+          <thead><tr><th>变量</th><th>状态</th><th>位置</th></tr></thead>
+          <tbody id="env-rows"></tbody>
+        </table>
+      </details>
+    </details>
+
+    <div class="row" style="margin-top:14px; gap:8px; flex-wrap:wrap; align-items:center;">
+      <button id="save-model">保存模型</button>
+      <button class="ghost" id="reset-model">恢复默认</button>
+      <button class="ghost" id="refresh-models" title="从供应商接口重新拉取模型列表">刷新模型列表</button>
+      <span class="msg" id="model-msg" style="margin:0"></span>
+    </div>
+    <p class="hint">写入 <span class="mono" id="patch-path"></span> 里的标记块，下次派活生效。</p>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>账号（dsh-opencode-go 内部）</h2>
+    <div class="hint" style="margin-bottom:10px;">供应商只有「OpenCode Go 网关」一个，账号在插件内部切换；这里列出配置里定义的账号。</div>
+    <div class="grid" id="account-rows"><div class="hint">读取中…</div></div>
+    <div class="row" style="margin-top:10px; gap:12px; align-items:center; flex-wrap:wrap;">
+      <label class="hint" style="margin:0; display:flex; align-items:center; gap:6px;">
+        <input type="checkbox" id="account-autoswitch" style="width:auto;" /> 额度出错时自动切换账号
+      </label>
+      <button class="ghost" id="account-refresh">重新读取</button>
+      <span class="msg" id="account-msg" style="margin:0"></span>
+    </div>
+  </section>
+
+<section id="quota-section">
+    <h2><span class="dot"></span>额度与派活档位</h2>
+    <div class="hint quota-error" id="quota-error" hidden></div>
+    <div class="quota-list">
+      <div class="quota-row" id="quota-claude">
+        <div class="quota-row-head">
+          <span class="quota-name">Claude</span>
+          <span class="pill warn" id="quota-claude-level">无数据</span>
+          <span class="hint quota-fresh" id="quota-claude-fresh"></span>
+        </div>
+        <div class="quota-body" id="quota-claude-body"></div>
+      </div>
+      <div class="quota-row" id="quota-codex">
+        <div class="quota-row-head">
+          <span class="quota-name">Codex</span>
+          <span class="pill warn" id="quota-codex-level">无数据</span>
+          <span class="hint quota-fresh" id="quota-codex-fresh"></span>
+        </div>
+        <div class="quota-body" id="quota-codex-body"></div>
+      </div>
+    </div>
+    <div class="quota-thresholds">
+      <div class="quota-field">
+        <label for="quota-high">多派阈值 %</label>
+        <input id="quota-high" type="number" min="1" max="100" step="1" />
+      </div>
+      <div class="quota-field">
+        <label for="quota-critical">全派阈值 %</label>
+        <input id="quota-critical" type="number" min="1" max="100" step="1" />
+      </div>
+      <button id="quota-save">保存阈值</button>
+      <div class="msg" id="quota-msg"></div>
+    </div>
+    <p class="hint">达到多派/全派时，Claude Code 每次收到你的消息会被提醒多把活派给 DSH；Codex 在新会话开始时收到同样的提醒。</p>
+  </section>
+
+<section>
+    <h2><span class="dot"></span>派活默认值（权限 / 审批 / 等待）</h2>
+    <div class="grid">
+      <div>
+        <label for="perm">沙箱模式</label>
+        <select id="perm">
+          <option value="workspace-write">workspace-write — 只能写工作目录 / write_scope 内</option>
+          <option value="danger-full-access">danger-full-access — 不限制写入范围</option>
+        </select>
+        <div class="hint">子代理默认在工作目录里跑；这一项决定它能写多远。</div>
+      </div>
+      <div>
+        <label for="approval">审批策略</label>
+        <select id="approval">
+          <option value="never">never — 无人值守，需要审批的调用直接拒绝</option>
+          <option value="ask">ask — 需要人工批准（headless 没人应答会等到超时）</option>
+        </select>
+        <div class="hint">选 ask 时建议把超时调小，避免一直挂着。</div>
+      </div>
+      <div>
+        <label for="softwait">单次调用最多等多久（毫秒）</label>
+        <input id="softwait" type="number" min="1" step="1000" />
+        <div class="hint">超过就交还 job id；0 = 一直等到结束。</div>
+      </div>
+      <div>
+        <label for="timeout">DSH 自身超时（毫秒，0 = 不限）</label>
+        <input id="timeout" type="number" min="0" step="10000" placeholder="0 = 不限制" />
+      </div>
+      <div>
+        <label for="concurrency">并行上限</label>
+        <input id="concurrency" type="number" min="0" step="1" placeholder="0 = 不限制" />
+        <div class="hint">0 = 一次全部放出去；填数字才限流。</div>
+      </div>
+      <div>
+        <label for="storage">运行记录最多占多少 MB</label>
+        <input id="storage" type="number" min="0" step="16" placeholder="0 = 不限制" />
+        <div class="hint">按磁盘大小滚动删除最旧的记录；0 = 不限制，1024 = 1 GB。</div>
+      </div>
+      <div style="display:flex; align-items:flex-end;">
+        <button id="save-settings">保存默认值</button>
+      </div>
+    </div>
+    <div class="msg" id="settings-msg"></div>
+    <p class="hint">存在 <span class="mono" id="settings-path"></span>；MCP 每次调用都会重读，改完不用重启客户端。也可以用环境变量 <span class="mono">DSH_DELEGATE_PERMISSION_MODE</span> / <span class="mono">DSH_DELEGATE_APPROVAL_POLICY</span> 给单个客户端单独覆盖。</p>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>子代理实时看板</h2>
+    <div class="row" style="gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+      <span class="pill ok" id="running-count">运行中 0</span>
+      <span class="pill" id="total-count">共 0</span>
+      <span class="hint" style="margin:0">每 1.5s 刷新；列数随窗口自适应（宽屏 6 个，窄屏更少）。</span>
+      <span class="pill" id="storage-info">磁盘 —</span>
+      <span class="pill" id="token-total">tokens —</span>
+      <span class="pill" id="more-info"></span>
+      <div style="flex:1"></div>
+      <button class="ghost" id="resume-failed" hidden>继续失败的</button>
+      <button class="ghost" id="more-runs" hidden>显示更多</button>
+      <button class="ghost" id="toggle-finished">显示已结束</button>
+      <button class="ghost" id="refresh-runs">立即刷新</button>
+    </div>
+    <div id="run-list" class="runs"></div>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>自检：实跑一次</h2>
+    <div class="row">
+      <input id="test-task" value="只回复两个字：可用" />
+      <button id="run-test">运行</button>
+    </div>
+    <pre id="test-out">等待运行…</pre>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>客户端接入</h2>
+    <table>
+      <thead><tr><th>客户端</th><th>配置位置</th><th>状态</th></tr></thead>
+      <tbody id="client-rows"></tbody>
+    </table>
+    <div class="row" style="margin-top:12px;">
+      <button id="install-clients">重新写入三个客户端</button>
+      <span class="hint" style="margin:0">改完重启对应客户端才会重新加载 MCP server。</span>
+    </div>
+    <div class="msg" id="client-msg"></div>
+  </section>
+</main>
+
+<div id="run-modal" class="modal" hidden>
+  <div class="modal-card">
+    <header class="modal-head">
+      <div>
+        <div class="modal-title" id="modal-title">子代理</div>
+        <div class="modal-meta" id="modal-meta"></div>
+      </div>
+      <button class="ghost" id="modal-close">关闭</button>
+    </header>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+let state = null;
+let runsTimer = null;
+let showFinished = false;
+
+function el(id) { return document.getElementById(id); }
+
+function relTime(ts) {
+  if (!ts) return '';
+  const seconds = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (seconds < 60) return seconds + 's';
+  if (seconds < 3600) return Math.round(seconds / 60) + 'm';
+  return (seconds / 3600).toFixed(1) + 'h';
+}
+
+function statePill(stateName) {
+  const map = { running: ['ok', '运行中'], done: ['ok', '完成'], failed: ['err', '失败'], interrupted: ['warn', '已中断'], lost: ['warn', '进程没了'] };
+  const [kind, text] = map[stateName] || ['warn', stateName];
+  const span = document.createElement('span');
+  span.className = 'pill ' + kind;
+  span.textContent = text;
+  return span;
+}
+
+function visibleColumns() {
+  const width = window.innerWidth;
+  if (width >= 1500) return 6;
+  if (width >= 1050) return 4;
+  if (width >= 760) return 3;
+  return 1;
+}
+
+const cardById = new Map();
+
+function ensureCard(run) {
+  let card = cardById.get(run.id);
+  if (card) return card;
+
+  card = document.createElement('div');
+  card.className = 'run';
+  card.dataset.id = run.id;
+
+  const head = document.createElement('div');
+  head.className = 'run-head';
+  const title = document.createElement('span');
+  title.className = 'run-title';
+  title.title = run.title || run.id;
+  head.appendChild(title);
+  const pillBox = document.createElement('span');
+  head.appendChild(pillBox);
+  card.appendChild(head);
+
+  const meta = document.createElement('div');
+  meta.className = 'run-meta';
+  card.appendChild(meta);
+
+  const box = document.createElement('div');
+  box.className = 'run-events';
+  card.appendChild(box);
+
+  card.__parts = { title, pillBox, meta, box };
+  card.addEventListener('click', () => openRunModal(run.id));
+  card.style.cursor = 'pointer';
+  cardById.set(run.id, card);
+  return card;
+}
+
+function updateCard(card, run, detail) {
+  const parts = card.__parts;
+  parts.title.textContent = run.title || run.id;
+  parts.pillBox.innerHTML = '';
+  parts.pillBox.appendChild(statePill(run.state));
+
+  const elapsed = run.durationMs ? Math.round(run.durationMs / 1000) + 's' : relTime(run.startedAt);
+  const tokenInfo = run.usage
+    ? formatTokens(run.usage.total) + ' tok · ' + run.usage.outputPerSecond + ' tok/s'
+    : '';
+  parts.meta.textContent = [run.kind, elapsed, run.toolCalls + '×工具', tokenInfo, run.sessionId ? run.sessionId.slice(0, 16) : '']
+    .filter(Boolean)
+    .join(' · ');
+
+  card.classList.toggle('running', run.state === 'running');
+  card.classList.toggle('failed', run.state === 'failed');
+
+  const events = detail && detail.events ? detail.events : [];
+  const signature = events.length + ':' + (events.length ? events[events.length - 1].t : 0);
+  if (card.dataset.signature === signature) return;
+  card.dataset.signature = signature;
+
+  // The card keeps no scrollbar: render exactly the tail that fits its measured
+  // height, bottom-aligned, so the newest activity always sits at the bottom edge.
+  const lineHeight = 17;
+  const available = (parts.box.clientHeight || 165) - 6;
+  const maxLines = Math.max(3, Math.floor(available / lineHeight));
+  parts.box.innerHTML = '';
+  if (events.length) {
+    const fragment = document.createDocumentFragment();
+    for (const event of events.slice(-maxLines)) {
+      const line = document.createElement('div');
+      line.className = event.kind;
+      line.textContent = formatEvent(event).slice(0, 160);
+      fragment.appendChild(line);
+    }
+    parts.box.appendChild(fragment);
+  } else {
+    parts.box.textContent = run.state === 'running' ? '等待第一段输出…' : (run.text || '（没有活动记录）');
+  }
+}
+
+let extraCards = 0;
+const detailCache = new Map(); // run id → { detail, at }
+
+function resetExtra() {
+  extraCards = 0;
+  detailCache.clear();
+}
+
+async function loadRuns() {
+  try {
+    const data = await api('/api/runs?limit=' + Math.min(500, 24 + extraCards));
+    el('running-count').textContent = '运行中 ' + data.running;
+    el('total-count').textContent = '共 ' + data.runs.length;
+    if (data.storage) {
+      const mb = (data.storage.bytes / 1024 / 1024).toFixed(1);
+      el('storage-info').textContent = '磁盘 ' + mb + ' MB · ' + data.storage.runs + ' 条 · 已压缩 ' + (data.storage.compressed || 0);
+    }
+    if (data.totals) {
+      const t = data.totals;
+      el('token-total').textContent = t.runs
+        ? 'Σ ' + formatTokens(t.total) + ' tok（出 ' + formatTokens(t.output) + '）· ' + t.outputPerSecond + ' tok/s · ' + t.runs + ' 次'
+        : 'tokens —';
+      el('token-total').title = t.runs
+        ? '所有记录合计：输入 ' + t.input + '，输出 ' + t.output + '，缓存读 ' + (t.cacheRead || 0)
+        : '还没有带用量的记录';
+    }
+
+    const list = el('run-list');
+    if (!data.runs.length) {
+      list.innerHTML = '<div class="hint">还没有运行记录。派一个任务或点上面的「运行」自检。</div>';
+      cardById.clear();
+      el('more-info').textContent = '';
+      return;
+    }
+    if (!showFinished && data.running === 0) {
+      list.innerHTML =
+        '<div class="hint">现在没有运行中的子代理。' +
+        (data.runs.length ? '点「显示已结束 (' + data.runs.length + ')」看历史记录。' : '') +
+        '</div>';
+      cardById.clear();
+      return;
+    }
+
+    const columns = visibleColumns();
+    const capacity = columns * 2 + extraCards;
+    const running = data.runs.filter((run) => run.state === 'running');
+    const finished = data.runs.filter((run) => run.state !== 'running');
+    const ordered = [...(showFinished ? [...running, ...finished] : running)].sort(
+      (a, b) => b.startedAt - a.startedAt,
+    );
+    const shown = ordered.slice(0, capacity);
+
+    el('toggle-finished').textContent = showFinished
+      ? '只看运行中'
+      : '显示已结束 (' + finished.length + ')';
+    const remaining = ordered.length - capacity;
+    el('more-info').textContent =
+      remaining > 0
+        ? '还有 ' + remaining + ' 条更早的记录'
+        : !showFinished && finished.length
+          ? '已结束的 ' + finished.length + ' 条已隐藏'
+          : '';
+    const failedCount = finished.filter((run) => run.state === 'failed' && run.sessionId).length;
+    el('resume-failed').hidden = failedCount === 0;
+    el('resume-failed').textContent = '继续失败的 (' + failedCount + ')';
+    el('more-runs').hidden = remaining <= 0;
+    el('more-runs').textContent = remaining > 0 ? '显示更多 (' + remaining + ')' : '';
+
+    for (const hint of [...list.querySelectorAll('.hint')]) hint.remove();
+
+    // Finished runs never change, so fetch their detail once per run instead of on
+    // every 1.5s poll: 8 cards × 1 request each added up while the box was loaded.
+    const details = await Promise.all(
+      shown.map(async (run) => {
+        const cached = detailCache.get(run.id);
+        if (cached && run.state !== 'running') return cached.detail;
+        if (cached && Date.now() - cached.at < 5000) return cached.detail;
+        const detail = await api('/api/runs/' + encodeURIComponent(run.id)).catch(() => null);
+        if (detail) detailCache.set(run.id, { detail, at: Date.now() });
+        return detail ?? (cached ? cached.detail : null);
+      }),
+    );
+    if (detailCache.size > 200) {
+      for (const key of [...detailCache.keys()].slice(0, detailCache.size - 200)) detailCache.delete(key);
+    }
+
+    const seen = new Set();
+    shown.forEach((run, index) => {
+      const card = ensureCard(run);
+      list.appendChild(card); // measure first, then fill
+      updateCard(card, run, details[index]);
+      seen.add(run.id);
+    });
+
+    for (const [id, card] of cardById) {
+      if (!seen.has(id)) {
+        card.remove();
+        cardById.delete(id);
+      }
+    }
+  } catch (cause) {
+    // The service may be restarting: keep polling instead of freezing on one error.
+    el('running-count').textContent = '运行中 —';
+    el('total-count').textContent = '共 —';
+    el('storage-info').textContent = '磁盘 —';
+    el('token-total').textContent = 'tokens —';
+  }
+}
+
+function formatTokens(value) {
+  if (!Number.isFinite(value) || value <= 0) return '0';
+  if (value >= 1_000_000) return (value / 1_000_000).toFixed(1) + 'M';
+  if (value >= 1000) return (value / 1000).toFixed(1) + 'k';
+  return String(value);
+}
+
+function formatEvent(event) {
+  const time = new Date(event.t).toLocaleTimeString();
+  if (event.kind === 'tool') return time + '  ⚙ ' + (event.name || 'tool') + (event.detail ? '  ' + event.detail : '');
+  if (event.kind === 'turn') return time + '  第 ' + event.turn + ' 轮';
+  if (event.kind === 'text') return time + '  ' + String(event.text || '').slice(0, 300);
+  if (event.kind === 'thinking') return time + '  💭 ' + String(event.text || '').replace(/\s+/g, ' ').slice(0, 200);
+  if (event.kind === 'result') {
+    const output = String(event.text || '').trim().replace(/\s+/g, ' ').slice(0, 220);
+    return time + '  ↳ ' + (output || '（无输出）');
+  }
+  return time + '  ' + JSON.stringify(event).slice(0, 160);
+}
+
+let modalRunId = null;
+let modalTimer = null;
+let modalSignature = '';
+let modalRendered = 0;
+
+const RUN_STATE_LABELS = { running: '运行中', done: '完成', failed: '失败', interrupted: '已中断', lost: '进程没了' };
+
+function eventToBlock(event) {
+  if (event.kind === 'turn') {
+    const div = document.createElement('div');
+    div.className = 'conv-turn';
+    div.textContent = '第 ' + event.turn + ' 轮';
+    return div;
+  }
+  if (event.kind === 'text') {
+    const div = document.createElement('div');
+    div.className = 'conv-text';
+    div.textContent = event.text;
+    return div;
+  }
+  if (event.kind === 'thinking') {
+    const details = document.createElement('details');
+    details.className = 'conv-think';
+    const summary = document.createElement('summary');
+    summary.textContent = '💭 思考';
+    details.appendChild(summary);
+    const pre = document.createElement('pre');
+    pre.textContent = String(event.text || '');
+    details.appendChild(pre);
+    return details;
+  }
+  if (event.kind === 'tool') {
+    const details = document.createElement('details');
+    details.className = 'conv-tool';
+    const summary = document.createElement('summary');
+    summary.textContent = '⚙ ' + (event.name || 'tool') + (event.detail ? ' — ' + event.detail : '');
+    details.appendChild(summary);
+    if (event.detail) {
+      const pre = document.createElement('pre');
+      pre.textContent = event.detail;
+      details.appendChild(pre);
+    }
+    return details;
+  }
+  if (event.kind === 'result') {
+    const wrap = document.createElement('div');
+    wrap.className = 'conv-result';
+    const pre = document.createElement('pre');
+    pre.textContent = String(event.text || '').trim() || '（无输出）';
+    wrap.appendChild(pre);
+    return wrap;
+  }
+  return null;
+}
+
+async function refreshModal() {
+  if (!modalRunId) return;
+  try {
+    const data = await api('/api/runs/' + encodeURIComponent(modalRunId));
+    const body = el('modal-body');
+    const events = data.events || [];
+
+    el('modal-title').textContent = data.run.title || data.run.id;
+    const elapsed = data.run.durationMs ? Math.round(data.run.durationMs / 1000) + 's' : relTime(data.run.startedAt);
+    el('modal-meta').textContent = [
+      data.run.kind,
+      RUN_STATE_LABELS[data.run.state] || data.run.state,
+      elapsed,
+      data.run.toolCalls + '×工具',
+      data.run.sessionId || '',
+    ].filter(Boolean).join(' · ');
+
+    // Only touch the DOM when something new arrived, and append instead of
+    // rebuilding: a full innerHTML reset is what snapped the view back to the top.
+    const signature = events.length + ':' + (events.length ? events[events.length - 1].t : 0);
+    if (signature === modalSignature) return;
+    modalSignature = signature;
+
+    const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 60;
+    const savedScroll = body.scrollTop;
+
+    if (events.length < modalRendered) {
+      body.innerHTML = '';
+      modalRendered = 0;
+    }
+    if (!events.length) {
+      body.textContent = '还没有事件。';
+      modalRendered = 0;
+      return;
+    }
+    for (const event of events.slice(modalRendered)) {
+      const block = eventToBlock(event);
+      if (block) body.appendChild(block);
+    }
+    modalRendered = events.length;
+
+    body.scrollTop = nearBottom ? body.scrollHeight : savedScroll;
+  } catch {
+    /* modal target may have been pruned */
+  }
+}
+
+function openRunModal(id) {
+  modalRunId = id;
+  modalSignature = '';
+  modalRendered = 0;
+  el('run-modal').hidden = false;
+  el('modal-body').innerHTML = '';
+  refreshModal();
+  if (modalTimer) clearInterval(modalTimer);
+  modalTimer = setInterval(refreshModal, 1200);
+}
+
+function closeRunModal() {
+  modalRunId = null;
+  el('run-modal').hidden = true;
+  if (modalTimer) clearInterval(modalTimer);
+  modalTimer = null;
+}
+
+el('modal-close').addEventListener('click', closeRunModal);
+el('run-modal').addEventListener('click', (event) => {
+  if (event.target === el('run-modal')) closeRunModal();
+});
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeRunModal();
+});
+
+function startRunPolling() {
+  if (runsTimer) clearInterval(runsTimer);
+  runsTimer = setInterval(() => { loadRuns(); }, 1500);
+}
+
+function pill(ok, text) {
+  const span = document.createElement('span');
+  span.className = 'pill ' + (ok ? 'ok' : 'warn');
+  span.textContent = text;
+  return span;
+}
+
+async function api(path, options) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  let response;
+  try {
+    response = await fetch(path, { ...(options || {}), signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
+  return data;
+}
+
+let serviceState = null;
+
+async function loadService() {
+  serviceState = await api('/api/service');
+  const running = serviceState.running;
+  const mode = serviceState.ui === null ? '未知' : serviceState.ui ? '服务 + 看板' : '仅服务';
+  el('svc-state').className = 'pill ' + (running ? 'ok' : 'warn');
+  el('svc-state').textContent = running ? '运行中' : '未运行';
+  el('svc-detail').textContent = running
+    ? mode + ' · :' + serviceState.port + ' · pid ' + serviceState.pid
+    : '--no-ui 时看板不可用，但 API 仍然在';
+  el('svc-autostart').className = 'pill ' + (serviceState.autostart.enabled ? 'ok' : 'warn');
+  el('svc-autostart').textContent = '自启动 ' + (serviceState.autostart.enabled ? '已开启' : '未开启');
+  el('svc-statefile').textContent = serviceState.stateFile;
+
+  const settings = serviceState.settings;
+  el('svc-mode').value = settings.daemonUi ? 'ui' : 'api';
+  el('svc-port').value = settings.daemonPort;
+  el('svc-autostart-toggle').value = settings.daemonAutostart ? 'on' : 'off';
+}
+
+function renderSettings() {
+  const settings = state.config.settings;
+  el('perm').value = settings.permissionMode;
+  el('approval').value = settings.approvalPolicy;
+  el('softwait').value = settings.softWaitMs;
+  el('timeout').value = settings.timeoutMs;
+  el('concurrency').value = settings.maxConcurrency;
+  el('storage').value = settings.maxStorageMb;
+  el('settings-path').textContent = state.config.settingsFile;
+  quotaSyncThresholdInputs({
+    high: quotaNumber(settings.quotaHighPct, 70),
+    critical: quotaNumber(settings.quotaCriticalPct, 90),
+  });
+}
+
+const QUOTA_PROVIDERS = [
+  { id: 'claude', hint: '在终端里用 Claude Code（安装时加 --usage-hooks）时才会记录百分比；桌面应用 Code 标签不运行 statusline，触顶信息从会话日志里读。' },
+  { id: 'codex', hint: '还没读到 Codex 的会话日志（~/.codex/sessions）。' },
+];
+const QUOTA_LIMIT_LABELS = { five_hour: '5 小时', seven_day: '本周', seven_day_opus: '本周 Opus', seven_day_sonnet: '本周 Sonnet' };
+const QUOTA_LEVELS = {
+  normal: { cls: 'pill ok', text: '正常' },
+  high: { cls: 'pill warn', text: '多派' },
+  critical: { cls: 'pill warn quota-badge-critical', text: '全派' },
+  unknown: { cls: 'pill warn', text: '无数据' },
+};
+const QUOTA_WINDOWS = [['five_hour', '5 小时'], ['seven_day', '本周']];
+let quotaHasData = false;
+let quotaThresholdsDirty = false;
+
+function quotaPad(value) { return String(value).padStart(2, '0'); }
+
+function quotaNumber(value, fallback) {
+  if (value === null || value === undefined || value === '') return fallback;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function quotaResetText(resetsAt) {
+  const stamp = Number(resetsAt);
+  if (!Number.isFinite(stamp)) return '';
+  const date = new Date(stamp * 1000);
+  if (Number.isNaN(date.getTime())) return '';
+  const now = new Date();
+  const time = quotaPad(date.getHours()) + ':' + quotaPad(date.getMinutes());
+  if (date.toDateString() === now.toDateString()) return time + ' 重置';
+  return (date.getMonth() + 1) + '月' + date.getDate() + '日 ' + time + ' 重置';
+}
+
+function quotaFreshness(at) {
+  const stamp = Number(at);
+  if (!Number.isFinite(stamp)) return '';
+  const minutes = Math.floor((Date.now() - stamp) / 60000);
+  if (minutes < 1) return '刚刚更新';
+  if (minutes < 60) return minutes + ' 分钟前更新';
+  return Math.floor(minutes / 60) + ' 小时前更新';
+}
+
+function quotaHint(text) {
+  const div = document.createElement('div');
+  div.className = 'hint';
+  div.textContent = text;
+  return div;
+}
+
+function quotaThresholds(data) {
+  const source = data && data.thresholds ? data.thresholds : {};
+  return {
+    high: quotaNumber(source.high, 70),
+    critical: quotaNumber(source.critical, 90),
+  };
+}
+
+function quotaWindowRow(label, window, thresholds) {
+  if (!window || !Number.isFinite(Number(window.used))) return null;
+  const raw = Number(window.used);
+  const used = Math.max(0, Math.min(100, Math.round(raw)));
+  const row = document.createElement('div');
+  row.className = 'quota-window';
+
+  const name = document.createElement('span');
+  name.className = 'quota-window-name';
+  name.textContent = label;
+
+  const pct = document.createElement('span');
+  pct.className = 'quota-window-pct';
+  pct.textContent = used + '%';
+
+  const bar = document.createElement('div');
+  bar.className = 'quota-bar';
+  const fill = document.createElement('div');
+  fill.className = 'quota-bar-fill';
+  fill.style.width = used + '%';
+  if (raw >= thresholds.critical) fill.classList.add('quota-danger');
+  else if (raw >= thresholds.high) fill.classList.add('quota-warn');
+  bar.appendChild(fill);
+
+  const reset = document.createElement('span');
+  reset.className = 'quota-reset';
+  reset.textContent = quotaResetText(window.resetsAt);
+
+  row.append(name, pct, bar, reset);
+  return row;
+}
+
+function quotaLimitRow(limit) {
+  if (!limit || !Number.isFinite(Number(limit.resetsAt))) return null;
+  const row = document.createElement('div');
+  row.className = 'quota-limit';
+  const name = document.createElement('span');
+  name.className = 'quota-limit-name';
+  name.textContent = (QUOTA_LIMIT_LABELS[limit.type] || '套餐') + '额度已用尽';
+  const reset = document.createElement('span');
+  reset.className = 'quota-reset';
+  reset.textContent = quotaResetText(limit.resetsAt);
+  row.append(name, reset);
+  return row;
+}
+
+function renderQuotaProvider(provider, info, thresholds) {
+  const badge = el('quota-' + provider.id + '-level');
+  const fresh = el('quota-' + provider.id + '-fresh');
+  const body = el('quota-' + provider.id + '-body');
+  if (!badge || !fresh || !body) return;
+
+  const level = info && QUOTA_LEVELS[info.level] ? info.level : 'unknown';
+  badge.className = QUOTA_LEVELS[level].cls;
+  badge.textContent = QUOTA_LEVELS[level].text;
+
+  const snapshot = info && info.snapshot ? info.snapshot : null;
+  fresh.textContent = snapshot ? quotaFreshness(snapshot.at) : '';
+
+  body.innerHTML = '';
+  if (!snapshot) {
+    body.appendChild(quotaHint(provider.hint));
+    return;
+  }
+
+  if (snapshot.limit) {
+    badge.className = QUOTA_LEVELS.critical.cls;
+    badge.textContent = '已触顶';
+  }
+
+  const limitRow = quotaLimitRow(snapshot.limit);
+  if (limitRow) body.appendChild(limitRow);
+
+  const windows = snapshot.windows || {};
+  let count = 0;
+  for (const [key, label] of QUOTA_WINDOWS) {
+    const row = quotaWindowRow(label, windows[key], thresholds);
+    if (row) {
+      body.appendChild(row);
+      count += 1;
+    }
+  }
+  if (!count && !limitRow) body.appendChild(quotaHint('这份快照里还没有额度窗口。'));
+}
+
+function quotaSyncThresholdInputs(thresholds) {
+  const pairs = [['quota-high', thresholds.high], ['quota-critical', thresholds.critical]];
+  for (const [id, value] of pairs) {
+    const input = el(id);
+    if (!input || quotaThresholdsDirty || document.activeElement === input) continue;
+    input.value = String(value);
+  }
+}
+
+function renderQuota(data) {
+  const thresholds = quotaThresholds(data);
+  for (const provider of QUOTA_PROVIDERS) {
+    renderQuotaProvider(provider, data ? data[provider.id] : null, thresholds);
+  }
+  quotaSyncThresholdInputs(thresholds);
+  const error = el('quota-error');
+  if (error) error.hidden = true;
+  quotaHasData = true;
+}
+
+function showQuotaError(cause) {
+  const error = el('quota-error');
+  if (error) {
+    error.hidden = false;
+    error.textContent = '额度数据读取失败：' + (cause && cause.message ? cause.message : '未知原因') + '；其它卡片不受影响，稍后自动重试。';
+  }
+  if (quotaHasData) return;
+  for (const provider of QUOTA_PROVIDERS) {
+    const badge = el('quota-' + provider.id + '-level');
+    if (badge) {
+      badge.className = QUOTA_LEVELS.unknown.cls;
+      badge.textContent = QUOTA_LEVELS.unknown.text;
+    }
+    const fresh = el('quota-' + provider.id + '-fresh');
+    if (fresh) fresh.textContent = '';
+    const body = el('quota-' + provider.id + '-body');
+    if (body) {
+      body.innerHTML = '';
+      body.appendChild(quotaHint('暂时读不到额度数据。'));
+    }
+  }
+}
+
+async function loadAccounts() {
+  const box = el('account-rows');
+  const msg = el('account-msg');
+  try {
+    const data = await api('/api/accounts');
+    if (!data.ok) {
+      box.innerHTML = '';
+      const hint = document.createElement('div');
+      hint.className = 'hint';
+      hint.textContent = data.error || '读不到账号配置';
+      box.appendChild(hint);
+      return;
+    }
+    box.innerHTML = '';
+    for (const account of data.accounts) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.style.cssText = 'gap:10px; align-items:center; flex-wrap:wrap; padding:6px 0; border-bottom:1px dashed var(--line);';
+
+      const name = document.createElement('strong');
+      name.textContent = account.name;
+      name.style.minWidth = '90px';
+
+      const id = document.createElement('span');
+      id.className = 'mono hint';
+      id.style.margin = '0';
+      id.textContent = account.id;
+
+      const env = document.createElement('span');
+      env.className = 'pill';
+      env.textContent = (account.env || '—') + (account.hasKey ? ' · 已设置' : ' · 缺 key');
+      env.className = 'pill ' + (account.hasKey ? 'ok' : 'warn');
+
+      row.append(name, id, env);
+
+      if (account.current) {
+        const badge = document.createElement('span');
+        badge.className = 'pill ok';
+        badge.textContent = '当前使用';
+        row.appendChild(badge);
+      } else {
+        const button = document.createElement('button');
+        button.className = 'ghost';
+        button.textContent = '切换到此账号';
+        button.addEventListener('click', async () => {
+          button.disabled = true;
+          msg.className = 'msg';
+          msg.textContent = '切换中…';
+          try {
+            await api('/api/accounts', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ id: account.id }),
+            });
+            msg.className = 'msg ok';
+            msg.textContent = '已切换到 ' + account.name;
+            await loadAccounts();
+          } catch (cause) {
+            button.disabled = false;
+            msg.className = 'msg err';
+            msg.textContent = cause.message;
+          }
+        });
+        row.appendChild(button);
+      }
+      box.appendChild(row);
+    }
+    el('account-autoswitch').checked = Boolean(data.autoSwitch);
+  } catch (cause) {
+    box.innerHTML = '';
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.textContent = cause.message;
+    box.appendChild(hint);
+  }
+}
+
+async function loadQuota() {
+  try {
+    const data = await api('/api/quota');
+    renderQuota(data || {});
+  } catch (cause) {
+    showQuotaError(cause);
+  }
+}
+
+function quotaReadThresholdInputs() {
+  const highText = el('quota-high').value.trim();
+  const criticalText = el('quota-critical').value.trim();
+  if (!/^\d+$/.test(highText) || !/^\d+$/.test(criticalText)) return null;
+  const high = Number(highText);
+  const critical = Number(criticalText);
+  if (high < 1 || high >= critical || critical > 100) return null;
+  return { high, critical };
+}
+
+function renderEnv() {
+  const rows = el('env-rows');
+  rows.innerHTML = '';
+  const keys = state.config.env.keys;
+  if (!keys.length) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="3" class="hint">还没有 .env 条目</td>';
+    rows.appendChild(tr);
+    return;
+  }
+  for (const key of keys) {
+    const tr = document.createElement('tr');
+    const name = document.createElement('td');
+    name.className = 'mono';
+    name.textContent = key.name;
+    const statusCell = document.createElement('td');
+    statusCell.appendChild(pill(!key.reserved, key.hasValue ? '已设置' : '空值'));
+    if (key.reserved) statusCell.appendChild(document.createTextNode(' DSH 保留，会被拒绝'));
+    const selected = el('provider') && el('provider').value;
+    const provider = state.config.providers.find((item) => item.id === selected);
+    if (provider && provider.envKey === key.name) {
+      const badge = document.createElement('span');
+      badge.className = 'pill ok';
+      badge.textContent = '当前供应商使用';
+      statusCell.appendChild(document.createTextNode(' '));
+      statusCell.appendChild(badge);
+    }
+
+    const where = document.createElement('td');
+    where.className = 'hint';
+    where.textContent = state.config.env.file;
+    tr.append(name, statusCell, where);
+    rows.appendChild(tr);
+  }
+}
+
+function renderClients() {
+  const rows = el('client-rows');
+  rows.innerHTML = '';
+  for (const [name, info] of Object.entries(state.clients)) {
+    const tr = document.createElement('tr');
+    const cellName = document.createElement('td');
+    cellName.textContent = name;
+    const cellFile = document.createElement('td');
+    cellFile.className = 'mono hint';
+    cellFile.textContent = info.file || '未找到';
+    const cellState = document.createElement('td');
+    cellState.appendChild(pill(info.configured, info.configured ? '已接入' : '未接入'));
+    tr.append(cellName, cellFile, cellState);
+    rows.appendChild(tr);
+  }
+}
+
+const EFFORT_LABELS = { off: '关闭', low: '低', medium: '中', high: '高' };
+
+function fillEffort(current) {
+  const select = el('effort');
+  select.innerHTML = '';
+  for (const value of state.config.reasoning) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = (EFFORT_LABELS[value] || value) + '（' + value + '）';
+    select.appendChild(option);
+  }
+  const fallback = document.createElement('option');
+  fallback.value = '';
+  fallback.textContent = '跟随会话默认';
+  select.appendChild(fallback);
+  select.value = current || '';
+}
+
+let catalogs = { providers: {}, errors: {} };
+
+async function loadCatalogs(force) {
+  const msg = el('model-msg');
+  try {
+    catalogs = await api('/api/models' + (force ? '?refresh=1' : ''));
+  } catch (cause) {
+    catalogs = { providers: {}, errors: { _: cause.message } };
+    if (force) {
+      msg.className = 'msg err';
+      msg.textContent = '拉取模型列表失败：' + cause.message;
+    }
+    return;
+  }
+  if (force) {
+    const id = el('provider').value;
+    const count = catalogFor(id).length;
+    // 只把「当前供应商」的问题当失败：另一条目录缺 key 不影响这里能用。
+    const others = Object.entries((catalogs && catalogs.errors) || {})
+      .filter(([key]) => key !== id && key !== '_')
+      .map(([key, why]) => key + ' ' + why);
+    msg.className = count ? 'msg ok' : 'msg err';
+    msg.textContent = count
+      ? '已刷新：' + count + ' 个模型可选。' + (others.length ? '（其它供应商：' + others.join('；') + '）' : '')
+      : '接口没返回模型：' + ((catalogs.errors && (catalogs.errors[id] || catalogs.errors._)) || '未知原因');
+  }
+  renderModel();
+}
+
+function catalogFor(providerId) {
+  return (catalogs.providers && catalogs.providers[providerId]) || [];
+}
+
+function fillModelSelect(current) {
+  const select = el('model-select');
+  select.innerHTML = '';
+  const providerId = el('provider').value;
+  const provider = state.config.providers.find((item) => item.id === providerId);
+  const names = catalogFor(providerId).length ? catalogFor(providerId) : (provider ? provider.models : []);
+  for (const name of names) {
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = name;
+    select.appendChild(option);
+  }
+  const custom = document.createElement('option');
+  custom.value = '__custom__';
+  custom.textContent = '自定义…';
+  select.appendChild(custom);
+
+  if (current && names.includes(current)) {
+    select.value = current;
+    el('model-custom').style.display = 'none';
+  } else if (current) {
+    select.value = '__custom__';
+    el('model-custom').style.display = 'block';
+    el('model-custom').value = current;
+  } else if (names.length) {
+    select.value = names[0];
+    el('model-custom').style.display = 'none';
+  } else {
+    select.value = '__custom__';
+    el('model-custom').style.display = 'block';
+  }
+}
+
+function currentModel() {
+  const select = el('model-select');
+  return select.value === '__custom__' ? el('model-custom').value.trim() : select.value;
+}
+
+function renderModel() {
+  const model = state.config.model;
+  const select = el('provider');
+  select.innerHTML = '';
+  for (const provider of state.config.providers) {
+    const option = document.createElement('option');
+    option.value = provider.id;
+    option.textContent = provider.label + (provider.available ? '' : '（未安装插件）');
+    select.appendChild(option);
+  }
+  if (!state.config.providers.some((provider) => provider.id === model.provider)) {
+    const option = document.createElement('option');
+    option.value = model.provider;
+    option.textContent = model.provider;
+    select.appendChild(option);
+  }
+  select.value = model.provider;
+  fillModelSelect(model.model);
+  fillEffort(model.reasoningEffort);
+  updateProviderHint(false);
+}
+
+function updateProviderHint(keepModel) {
+  const id = el('provider').value;
+  const provider = state.config.providers.find((item) => item.id === id);
+  const hint = el('provider-hint');
+
+  if (!keepModel) {
+    // Provider switch: jump to the first model the catalog offers.
+    fillModelSelect('');
+  } else {
+    fillModelSelect(currentModel() || state.config.model.model);
+  }
+
+  if (!provider) {
+    hint.textContent = '自定义供应商：确认对应插件已装进 headless profile。';
+    return;
+  }
+  const live = catalogFor(id);
+  const parts = [];
+  parts.push(provider.available ? '插件已安装' : '插件未安装 → dsh plugin --profile headless add ' + provider.plugin);
+  parts.push(
+    provider.envKey
+      ? provider.hasCredential
+        ? '使用 ' + provider.envKey + '（已设置）'
+        : '缺 ' + provider.envKey + '（未设置）'
+      : '无需 API key',
+  );
+  if (live.length) parts.push('接口返回 ' + live.length + ' 个模型');
+  else if (catalogs.errors && catalogs.errors[id]) parts.push('拉取失败：' + catalogs.errors[id]);
+  hint.textContent = parts.join(' · ');
+
+  const credState = el('cred-state');
+  if (credState) {
+    if (!provider.envKey) {
+      credState.className = 'pill';
+      credState.textContent = '该供应商不需要 API key';
+    } else if (provider.hasCredential) {
+      credState.className = 'pill ok';
+      credState.textContent = provider.envKey + ' · 已设置';
+    } else {
+      credState.className = 'pill warn';
+      credState.textContent = provider.envKey + ' · 未设置';
+    }
+  }
+
+  const fill = el('fill-env');
+  if (provider.envKey) {
+    fill.hidden = false;
+    // Never look like something is missing when it is already configured.
+    fill.textContent = provider.hasCredential
+      ? '更换 ' + provider.envKey
+      : '去填 ' + provider.envKey + ' →';
+    fill.title = provider.hasCredential
+      ? '这个变量已有值；点这里可以覆盖'
+      : '这个变量还没有值';
+  } else {
+    fill.hidden = true;
+  }
+}
+
+let retryTimer = null;
+
+function showDisconnected(cause) {
+  const banner = el('conn-banner');
+  if (banner) {
+    banner.hidden = false;
+    banner.querySelector('span').textContent =
+      '服务未连接：' + (cause && cause.message ? cause.message : '未知原因') + '（数据仍在磁盘上，连上即恢复）';
+  }
+  if (retryTimer) return;
+  retryTimer = setInterval(() => {
+    load().then(() => {
+      clearInterval(retryTimer);
+      retryTimer = null;
+    }).catch(() => {});
+  }, 3000);
+}
+
+async function load() {
+  state = await api('/api/state');
+  const banner = el('conn-banner');
+  if (banner) banner.hidden = true;
+  if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
+  const launch = state.dsh.launch;
+  el('dsh-tag').textContent = launch ? ('DSH 已找到：' + (launch.kind === 'desktop' ? '桌面版' : 'CLI')) : '未找到 DSH';
+  el('node-tag').textContent = 'node ' + state.dsh.node + ' · ' + state.dsh.platform;
+  const kv = el('env-kv');
+  kv.innerHTML = '';
+  const rows = [
+    ['DSH 位置', launch ? launch.detail : (state.dsh.launchError || '未知')],
+    ['DSH_HOME', state.config.dshHome],
+    ['headless profile', state.config.profileDir],
+    ['启动命令', state.launcher || '—'],
+    ['当前模型', state.config.model.provider + ' / ' + state.config.model.model + (state.config.model.reasoningEffort ? ' / ' + state.config.model.reasoningEffort : '')],
+  ];
+  for (const [key, value] of rows) {
+    const dt = document.createElement('dt');
+    dt.textContent = key;
+    const dd = document.createElement('dd');
+    dd.className = 'mono';
+    dd.textContent = value;
+    kv.append(dt, dd);
+  }
+  el('patch-path').textContent = state.config.patchFile;
+  renderModel();
+  renderSettings();
+  renderEnv();
+  renderClients();
+  await loadService();
+  await loadAccounts();
+  await loadCatalogs(false);
+  await loadRuns();
+}
+
+el('refresh').addEventListener('click', () => load().catch(showError));
+el('refresh-runs').addEventListener('click', () => loadRuns());
+el('resume-failed').addEventListener('click', async () => {
+  const button = el('resume-failed');
+  button.disabled = true;
+  button.textContent = '正在继续…';
+  try {
+    const result = await api('/api/runs/retry', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ limit: 8, concurrency: 2 }),
+    });
+    button.textContent = '已继续 ' + ((result.started && result.started.length) || 0) + ' 个';
+    await loadRuns();
+  } catch (cause) {
+    button.textContent = '继续失败：' + cause.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+el('more-runs').addEventListener('click', async () => {
+  extraCards += Math.max(8, visibleColumns() * 2);
+  await loadRuns();
+});
+
+el('toggle-finished').addEventListener('click', () => {
+  showFinished = !showFinished;
+  el('toggle-finished').textContent = showFinished ? '只看运行中' : '显示已结束';
+  if (!showFinished) {
+    for (const [id, card] of cardById) {
+      card.remove();
+    }
+    cardById.clear();
+  }
+  loadRuns();
+});
+
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  if (resizeTimer) clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { loadRuns(); }, 200);
+});
+el('provider').addEventListener('change', () => {
+  updateProviderHint(false);
+  if (state && state.config) renderEnv();
+});
+el('fill-env').addEventListener('click', () => {
+  const provider = state.config.providers.find((item) => item.id === el('provider').value);
+  if (!provider || !provider.envKey) return;
+  el('env-name').value = provider.envKey;
+  el('env-value').value = '';
+  const block = el('cred-block');
+  block.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  block.classList.remove('flash');
+  void block.offsetWidth;
+  block.classList.add('flash');
+  setTimeout(() => block.classList.remove('flash'), 2400);
+  el('env-value').focus();
+});
+
+el('model-select').addEventListener('change', () => {
+  el('model-custom').style.display = el('model-select').value === '__custom__' ? 'block' : 'none';
+});
+el('refresh-models').addEventListener('click', async () => {
+  const msg = el('model-msg');
+  msg.className = 'msg';
+  msg.textContent = '拉取模型列表…';
+  await loadCatalogs(true);
+  const id = el('provider').value;
+  const count = catalogFor(id).length;
+  if (count > 0) {
+    msg.className = 'msg ok';
+    msg.textContent = '已刷新：' + count + ' 个模型可选。';
+  } else {
+    msg.className = 'msg err';
+    msg.textContent = '拉取失败：' + ((catalogs.errors && catalogs.errors[id]) || '接口没有返回模型');
+  }
+});
+
+el('switch-provider').addEventListener('click', async () => {
+  const msg = el('model-msg');
+  const providerId = el('provider').value;
+  if (!providerId) {
+    msg.className = 'msg err';
+    msg.textContent = '先选一个供应商';
+    return;
+  }
+  const provider = state.config.providers.find((item) => item.id === providerId);
+  const names = catalogFor(providerId).length ? catalogFor(providerId) : (provider ? provider.models : []);
+  let model = currentModel();
+  // 换供应商时旧模型往往不属于新供应商，自动落到第一个可用模型，避免“保存没反应”
+  if (!model || (names.length && !names.includes(model))) {
+    model = names[0] || '';
+    if (model) {
+      const select = el('model-select');
+      select.value = model;
+      const custom = el('model-custom');
+      if (custom) custom.value = '';
+    }
+  }
+  if (!model) {
+    msg.className = 'msg err';
+    msg.textContent = '这个供应商没有可用模型，先点“刷新模型列表”';
+    return;
+  }
+  msg.className = 'msg';
+  msg.textContent = '切换中…';
+  try {
+    await api('/api/model', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: providerId, model, reasoningEffort: el('effort').value }),
+    });
+    msg.className = 'msg ok';
+    msg.textContent = '已切到 ' + (provider ? provider.name || provider.id : providerId) + ' / ' + model + '，下次派活生效。';
+    await load();
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = cause.message;
+  }
+});
+
+el('save-model').addEventListener('click', async () => {
+  const msg = el('model-msg');
+  msg.className = 'msg';
+  msg.textContent = '保存中…';
+  try {
+    await api('/api/model', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: el('provider').value, model: currentModel(), reasoningEffort: el('effort').value }),
+    });
+    msg.className = 'msg ok';
+    msg.textContent = '已保存，下次派活生效。';
+    await load();
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = cause.message;
+  }
+});
+
+el('reset-model').addEventListener('click', async () => {
+  const msg = el('model-msg');
+  try {
+    await api('/api/model/reset', { method: 'POST' });
+    msg.className = 'msg ok';
+    msg.textContent = '已移除 dsh-delegate 的模型覆盖块。';
+    await load();
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = cause.message;
+  }
+});
+
+el('svc-save').addEventListener('click', async () => {
+  const msg = el('svc-msg');
+  msg.className = 'msg';
+  msg.textContent = '保存中…';
+  try {
+    const result = await api('/api/service', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        daemonUi: el('svc-mode').value === 'ui',
+        daemonPort: Number(el('svc-port').value),
+        daemonAutostart: el('svc-autostart-toggle').value === 'on',
+      }),
+    });
+    msg.className = 'msg ok';
+    msg.textContent = result.restartRequired ? '已保存；模式或端口变了，点「重启服务」生效。' : '已保存。';
+    await loadService();
+  await loadCatalogs(false);
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = cause.message;
+  }
+});
+
+el('svc-restart').addEventListener('click', async () => {
+  const msg = el('svc-msg');
+  msg.className = 'msg';
+  msg.textContent = '重启中…';
+  try {
+    await api('/api/service/restart', { method: 'POST' });
+    msg.textContent = '服务在重启，页面会自动重连…';
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      try {
+        const probe = await api('/api/service');
+        if (probe.running) {
+          msg.className = 'msg ok';
+          msg.textContent = '服务已重启（' + (probe.ui ? '服务 + 看板' : '仅服务') + ' · :' + probe.port + '）。';
+          await loadService();
+          return;
+        }
+      } catch {
+        /* still coming up */
+      }
+    }
+    msg.className = 'msg err';
+    msg.textContent = '重启后没探到服务，用 dsh-delegate status 看一眼。';
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = '如果当前页面就是被重启的这个服务，刷新一下即可：' + cause.message;
+  }
+});
+
+el('save-settings').addEventListener('click', async () => {
+  const msg = el('settings-msg');
+  msg.className = 'msg';
+  msg.textContent = '保存中…';
+  try {
+    await api('/api/settings', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        permissionMode: el('perm').value,
+        approvalPolicy: el('approval').value,
+        softWaitMs: Number(el('softwait').value),
+        timeoutMs: Number(el('timeout').value),
+        maxConcurrency: Number(el('concurrency').value),
+        maxStorageMb: Number(el('storage').value),
+      }),
+    });
+    msg.className = 'msg ok';
+    msg.textContent = '已保存，下一次派活就按这个走。';
+    await load();
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = cause.message;
+  }
+});
+
+el('account-refresh').addEventListener('click', () => loadAccounts());
+
+el('account-autoswitch').addEventListener('change', async () => {
+  const msg = el('account-msg');
+  try {
+    await api('/api/accounts', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'autoSwitch', enabled: el('account-autoswitch').checked }),
+    });
+    msg.className = 'msg ok';
+    msg.textContent = '已保存自动切换设置';
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = cause.message;
+  }
+});
+
+el('quota-save').addEventListener('click', async () => {
+  const msg = el('quota-msg');
+  const values = quotaReadThresholdInputs();
+  if (!values) {
+    msg.className = 'msg err';
+    msg.textContent = '阈值必须是整数，且 1 ≤ 多派 < 全派 ≤ 100。';
+    return;
+  }
+  msg.className = 'msg';
+  msg.textContent = '保存中…';
+  try {
+    await api('/api/settings', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ quotaHighPct: values.high, quotaCriticalPct: values.critical }),
+    });
+    quotaThresholdsDirty = false;
+    msg.className = 'msg ok';
+    msg.textContent = '已保存';
+    await loadQuota();
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = cause.message;
+  }
+});
+
+for (const id of ['quota-high', 'quota-critical']) {
+  el(id).addEventListener('input', () => { quotaThresholdsDirty = true; });
+}
+
+el('save-env').addEventListener('click', async () => {
+  const msg = el('env-msg');
+  msg.className = 'msg';
+  msg.textContent = '写入中…';
+  try {
+    await api('/api/env', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: el('env-name').value.trim(), value: el('env-value').value }),
+    });
+    msg.className = 'msg ok';
+    msg.textContent = '已写入 .env。';
+    el('env-value').value = '';
+    await load();
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = cause.message;
+  }
+});
+
+el('run-test').addEventListener('click', async () => {
+  const out = el('test-out');
+  out.textContent = '';
+  const button = el('run-test');
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/test', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ task: el('test-task').value }),
+    });
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let index = buffer.indexOf('\n');
+      while (index !== -1) {
+        const line = buffer.slice(0, index).trim();
+        buffer = buffer.slice(index + 1);
+        if (line) {
+          const event = JSON.parse(line);
+          if (event.kind === 'final') {
+            out.textContent += '\n=== ' + (event.ok ? '成功' : '失败') + ' · ' + Math.round(event.durationMs / 1000) + 's ===\n' + (event.text || event.reason || '') + '\n';
+          } else if (event.kind === 'tool') {
+            out.textContent += '· 调用 ' + event.name + '\n';
+          } else if (event.kind === 'turn') {
+            out.textContent += '· 第 ' + event.turn + ' 轮\n';
+          }
+        }
+        index = buffer.indexOf('\n');
+      }
+      out.scrollTop = out.scrollHeight;
+    }
+  } catch (cause) {
+    out.textContent += '\n错误：' + cause.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+el('install-clients').addEventListener('click', async () => {
+  const msg = el('client-msg');
+  msg.className = 'msg';
+  msg.textContent = '写入中…';
+  try {
+    const result = await api('/api/clients/install', { method: 'POST' });
+    msg.className = 'msg ok';
+    msg.textContent = result.results.map((item) => item.target + ': ' + item.status).join(' | ');
+    await load();
+  } catch (cause) {
+    msg.className = 'msg err';
+    msg.textContent = cause.message;
+  }
+});
+
+window.addEventListener('error', (event) => {
+    const tag = document.getElementById('dsh-tag');
+    if (tag) tag.textContent = '页面脚本错误：' + (event.message || '未知');
+  });
+
+function showError(cause) {
+  el('dsh-tag').textContent = '状态读取失败：' + cause.message;
+}
+
+load().catch((cause) => {
+  showError(cause);
+  showDisconnected(cause);
+});
+el('conn-retry').addEventListener('click', () => load().catch(showDisconnected));
+
+// Poll regardless of the first load outcome, so a restarting service heals itself.
+loadQuota();
+setInterval(loadQuota, 15000);
+startRunPolling();
+setInterval(() => {
+  if (!state) load().catch(() => {});
+}, 5000);
+</script>
+</body>
+</html>
