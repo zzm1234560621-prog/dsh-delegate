@@ -1,6 +1,6 @@
 {
   "name": "dsh-delegate",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Let Claude Desktop, Claude Code and Codex delegate self-contained tasks to a local DeepSeek Harness (DSH) subagent over MCP: parallel fan-out with per-task write scopes, async jobs that outlive host timeouts, token stats and a local dashboard. Zero dependencies.",
   "license": "MIT",
   "author": "zzm1234560621-prog",
