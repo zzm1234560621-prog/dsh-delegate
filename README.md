@@ -34,14 +34,19 @@ Claude Desktop / Claude Code / Codex
 
 两种装法的目的一样：把 Claude 桌面版、Claude Code、Codex 接到本机 DSH。DSH 自己派子代理用的是它内置的 subagent，不经过本工具。
 
-| | A. 安装脚本 | B. DSH 插件 |
-|---|---|---|
-| 把三个客户端接到 DSH（MCP 配置） | ✓ 安装时写一次 | ✓ 每次 DSH 启动时检查，不一致才写 |
-| skill 和全局分工说明（教 Claude 哪些活该派） | ✓ | — |
-| `dsh` 命令行启动器 | ✓ | — |
-| DSH 输入框上方的委派面板 | — | ✓ |
+两种装法装出来的东西一样，任选一种：
 
-推荐两个都装：脚本把全套装好，插件负责以后自动校准配置、提供面板。插件会优先使用脚本部署的运行时。
+- **A. 安装包**：装好全套，并在 DSH 桌面版里装上插件。插件只在 DSH 没运行时才能装上；DSH 正在运行的话，退出后重跑一次安装，或者在 DSH 的插件市场里装。
+- **B. DSH 插件**：从 DSH 的插件市场装。DSH 启动时，插件用自己带的运行时装好同样的全套，再把本机服务拉起来。
+
+全套包括：
+- 三个客户端的 MCP 配置；
+- 教 Claude 哪些活该派的 skill 和分工说明；
+- `dsh` 命令行启动器；
+- 本机服务（看板、配 key 的页面）；
+- DSH 输入框上方的委派面板。
+
+两种装法共用 `~/.dsh/bridge` 里的运行时，以后谁的版本新就用谁的。插件每次随 DSH 启动时还会核对一遍客户端配置。
 
 ### A. 安装脚本
 
@@ -97,7 +102,25 @@ cd dsh-delegate
 dsh plugin --profile <profile> add "file:/path/to/dsh-delegate/plugin"
 ```
 
-装完重启该 profile。之后 DSH 每次启动都会检查三个客户端的 MCP 配置，只在不一致时才写，写之前备份。需要 PATH 上有 `node`。委派面板显示本机服务的状态，以及 Claude / Codex 派来的任务；DSH 自己的子代理不会出现在这里。不想让插件改外部客户端，就在插件配置里设 `wireClients: false`。
+也可以直接在 DSH 的插件市场里搜 dsh-delegate 安装。装完重启 DSH。
+
+插件第一次启动时，用自己带的运行时跑一遍安装，装出来的和 A 一样。之后每次启动：
+- 插件版本比 `~/.dsh/bridge` 里的新时，才重装；
+- 否则只核对三个客户端的配置，不一致才写，写之前备份；
+- 本机服务没在运行就拉起来，DSH 里的委派面板和看板要用它。
+
+插件找 Node 的顺序：`DSH_DELEGATE_NODE`、PATH 上的 `node`、DSH 自带的 Node。所以没装 Node.js 也能用。过程记在 `~/.dsh/delegate-plugin.log`。
+
+委派面板显示本机服务的状态，以及 Claude / Codex 派来的任务；DSH 自己的子代理不会出现在这里。
+
+插件配置（DSH 里的插件设置）：
+
+| 配置 | 默认 | 作用 |
+|---|---|---|
+| `wireClients` | `true` | 写 Claude 桌面版、Claude Code、Codex 的配置 |
+| `startService` | `true` | DSH 启动时拉起本机服务 |
+| `autostart` | `false` | 登录时启动服务，停了自动拉起，同 `--autostart` |
+| `usageHooks` | `false` | Claude Code 的额度提醒，同 `--usage-hooks` |
 
 ### 安装器会改哪些文件
 

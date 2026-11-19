@@ -15,6 +15,11 @@ if (process.env.FAKE_DSH_LOG) {
     `${JSON.stringify({ args, electron: process.env.ELECTRON_RUN_AS_NODE || null, dshHome: process.env.DSH_HOME || null })}\n`,
   );
 }
+// FAKE_DSH_FAIL=<text>: a `plugin` command prints it and fails.
+if (process.env.FAKE_DSH_FAIL && args[0] === 'plugin') {
+  process.stderr.write(process.env.FAKE_DSH_FAIL);
+  process.exit(1);
+}
 let input = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk) => {

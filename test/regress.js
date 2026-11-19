@@ -668,6 +668,168 @@ console.log('\n== 安装时补装供应商插件：按 DSH 的启动方式运行
   check('安装结果里这一步是 installed', /provider-plugin\s+installed/.test(row), row || run.stderr.trim().slice(0, 200));
 }
 
+// ---------------------------------------------------------------- plugin = installer
+
+const readOr = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '');
+const readJson = (file) => {
+  try {
+    return JSON.parse(readOr(file));
+  } catch {
+    return {};
+  }
+};
+const lastJson = (text) => {
+  try {
+    return JSON.parse(String(text).trim().split('\n').pop());
+  } catch {
+    return {};
+  }
+};
+
+console.log('\n== 只装 DSH 插件：装出来的和安装包一样 ==');
+{
+  const pluginUrl = require('node:url').pathToFileURL(path.join(ROOT, 'plugin', 'index.js')).href;
+  const boot = (sb, code, extra) =>
+    nodeEval(
+      sb,
+      `import(${JSON.stringify(pluginUrl)}).then(async (m) => { ${code} })` +
+        '.catch((e) => { console.error(e && e.stack ? e.stack : e); process.exit(1); })',
+      extra,
+    );
+  const sb = sandbox('pluginonly');
+  const version = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
+  const bridge = path.join(sb.home, 'bridge');
+  const bridgeVersion = () => readJson(path.join(bridge, 'package.json')).version;
+  const start = (config) => boot(sb, `console.log(JSON.stringify(await m.bootstrap(${JSON.stringify(config)})));`, FAKE_DESKTOP);
+
+  const first = start({ startService: false });
+  const s1 = lastJson(first.stdout);
+  check(
+    '第一次启动：用插件自带的运行时装好 ~/.dsh/bridge',
+    s1.installed === true && bridgeVersion() === version && fs.existsSync(path.join(bridge, 'bin', 'dsh-delegate.js')),
+    `${JSON.stringify(s1)} ${first.stderr.trim().slice(-300)}`,
+  );
+  check(
+    '和安装包一样装了 skill 和分工说明',
+    fs.existsSync(path.join(sb.home, 'skills', 'dsh-delegate', 'SKILL.md')) &&
+      fs.existsSync(path.join(sb.user, '.claude', 'skills', 'dsh-delegate', 'SKILL.md')) &&
+      /dsh-delegate:start/.test(readOr(path.join(sb.user, '.claude', 'CLAUDE.md'))),
+  );
+  const pluginLog = readOr(path.join(sb.home, 'delegate-plugin.log'));
+  check('安装过程记在 $DSH_HOME/delegate-plugin.log', /install 退出码 0/.test(pluginLog) && /client:/.test(pluginLog), pluginLog.slice(0, 300));
+
+  fs.writeFileSync(path.join(bridge, 'MARKER'), 'x');
+  const s2 = lastJson(start({ startService: false }).stdout);
+  check('再次启动：版本没变不重装，只核对客户端配置', s2.installed === false && s2.wired === true && fs.existsSync(path.join(bridge, 'MARKER')), JSON.stringify(s2));
+
+  const pkgFile = path.join(bridge, 'package.json');
+  fs.writeFileSync(pkgFile, JSON.stringify({ ...readJson(pkgFile), version: '0.0.1' }));
+  const s3 = lastJson(start({ startService: false }).stdout);
+  check('插件比 bridge 新：重新安装', s3.installed === true && bridgeVersion() === version && !fs.existsSync(path.join(bridge, 'MARKER')), JSON.stringify(s3));
+
+  const port = 30000 + Math.floor(Math.random() * 10000);
+  nodeEval(sb, `require(${req('config.js')}).writeSettings({ daemonPort: ${port}, daemonUi: false })`);
+  start({});
+  const daemonLog = path.join(sb.home, 'delegate-daemon.log');
+  const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  for (let i = 0; i < 50 && !/started/.test(readOr(daemonLog)); i += 1) pause(200);
+  const started = /started http:\/\/127\.0\.0\.1:(\d+)/.exec(readOr(daemonLog));
+  check('DSH 启动时把本机服务也拉起来（面板和看板要用）', Boolean(started) && Number(started[1]) === port, readOr(daemonLog).slice(0, 200));
+  const state = lastJson(nodeEval(sb, `console.log(JSON.stringify(require(${req('daemon.js')}).status()))`).stdout);
+  try {
+    if (state.pid) process.kill(state.pid);
+  } catch {
+    /* already gone */
+  }
+
+  const winExe = path.join(sb.dir, 'DSH NEXT', 'DSH NEXT.exe');
+  const winNode = path.join(sb.dir, 'DSH NEXT', 'resources', 'runtime', 'x64', 'primary-runtime', 'dependencies', 'node', 'bin', 'node.exe');
+  const macApp = path.join(sb.dir, 'DeepSeek Harness.app', 'Contents');
+  const macExe = path.join(macApp, 'MacOS', 'DeepSeek Harness');
+  const macNode = path.join(macApp, 'Resources', 'runtime', 'primary-runtime', 'dependencies', 'node', 'bin', 'node');
+  for (const file of [winExe, winNode, macExe, macNode]) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, '');
+  }
+  const nodes = lastJson(
+    boot(
+      sb,
+      'console.log(JSON.stringify([' +
+        `m.bundledNode(${JSON.stringify(winExe)}, 'win32', 'x64'),` +
+        `m.bundledNode(${JSON.stringify(macExe)}, 'darwin', 'arm64'),` +
+        `m.resolveNodePath({ execPath: ${JSON.stringify(winExe)}, versions: { electron: '1' }, platform: 'win32', arch: 'x64', env: { PATH: ${JSON.stringify(SYS[0])} } }),` +
+        "m.resolveNodePath({ execPath: 'C:/x/node.exe', versions: {}, platform: 'win32', arch: 'x64', env: {} })" +
+        ']));',
+    ).stdout,
+  );
+  check('找得到 DSH 自带的 Node（Windows 和 macOS 两种目录结构）', nodes[0] === winNode && nodes[1] === macNode, JSON.stringify(nodes));
+  check(
+    '在 DSH 里运行、PATH 上没有 node：用 DSH 自带的；本来就跑在 Node 上：用它自己',
+    nodes[2] === winNode && nodes[3] === 'C:/x/node.exe',
+    JSON.stringify(nodes),
+  );
+}
+
+console.log('\n== 安装包顺手把插件装进 DSH 桌面版 ==');
+{
+  const withProfile = (label, deps) => {
+    const sb = sandbox(label);
+    const profile = path.join(sb.home, 'profiles', 'desktop');
+    fs.mkdirSync(profile, { recursive: true });
+    fs.writeFileSync(path.join(profile, 'package.json'), JSON.stringify({ dependencies: deps }));
+    return { sb, log: path.join(sb.dir, 'fake-dsh.log') };
+  };
+  const desktopCalls = (log) =>
+    readOr(log)
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((call) => call.args[0] === 'plugin' && call.args[2] === 'desktop');
+  const row = (text) => text.split('\n').find((line) => line.includes('dsh-plugin')) || '';
+  const install = ({ sb, log }, running, extra = []) =>
+    cli(sb, ['install', '--no-clients', ...extra], { ...FAKE_DESKTOP, FAKE_DSH_LOG: log, DSH_DELEGATE_DESKTOP_RUNNING: running });
+
+  const fresh = withProfile('dshplugin', {});
+  const own = `link:${path.join(fresh.sb.home, 'bridge', 'plugin').replace(/\\/g, '/')}`;
+  const added = install(fresh, '0');
+  check(
+    'DSH 没在运行、还没装插件：以 link: 指向 bridge 里的插件，装进 desktop profile',
+    desktopCalls(fresh.log).some((call) => call.args.join(' ') === `plugin --profile desktop add ${own}`) &&
+      fs.existsSync(path.join(fresh.sb.home, 'bridge', 'plugin', 'index.js')) &&
+      /dsh-plugin\s+installed/.test(row(added.stdout)),
+    `${row(added.stdout)} ${JSON.stringify(desktopCalls(fresh.log))}`,
+  );
+
+  const busy = withProfile('dshplugin-busy', {});
+  const busyRun = install(busy, '1');
+  check(
+    'DSH 正在运行：不动它的 profile，提示退出后重跑，或去插件市场装',
+    desktopCalls(busy.log).length === 0 && /skipped/.test(row(busyRun.stdout)) && /正在运行/.test(row(busyRun.stdout)),
+    row(busyRun.stdout),
+  );
+
+  const market = withProfile('dshplugin-market', { 'dsh-delegate': '1.4.1' });
+  const marketRun = install(market, '0');
+  check('已经从插件市场装过（或开发用的 link:）：不改', desktopCalls(market.log).length === 0 && /dsh-plugin\s+ok/.test(row(marketRun.stdout)), row(marketRun.stdout));
+
+  const optOut = withProfile('dshplugin-optout', {});
+  const optOutRun = install(optOut, '0', ['--no-dsh-plugin']);
+  check('--no-dsh-plugin：不装', desktopCalls(optOut.log).length === 0 && !row(optOutRun.stdout), row(optOutRun.stdout));
+
+  fs.writeFileSync(path.join(fresh.sb.home, 'profiles', 'desktop', 'package.json'), JSON.stringify({ dependencies: { 'dsh-delegate': own } }));
+  fs.rmSync(fresh.log, { force: true });
+  cli(fresh.sb, ['uninstall'], { ...FAKE_DESKTOP, FAKE_DSH_LOG: fresh.log, DSH_DELEGATE_DESKTOP_RUNNING: '0' });
+  check(
+    '卸载时把安装器加的插件从 DSH 里去掉',
+    desktopCalls(fresh.log).some((call) => call.args.join(' ') === 'plugin --profile desktop remove dsh-delegate'),
+    JSON.stringify(desktopCalls(fresh.log)),
+  );
+  fs.rmSync(market.log, { force: true });
+  const kept = cli(market.sb, ['uninstall'], { ...FAKE_DESKTOP, FAKE_DSH_LOG: market.log, DSH_DELEGATE_DESKTOP_RUNNING: '0' });
+  check('不是安装器加的（插件市场、开发用的 link:）：卸载时保留', desktopCalls(market.log).length === 0 && /dsh-plugin\s+kept/.test(row(kept.stdout)), row(kept.stdout));
+}
+
 // ---------------------------------------------------------------- one-file installers
 
 /** A POSIX sh for the macOS / Linux scripts: /bin/sh, or the one Git for Windows ships. */
@@ -1007,15 +1169,20 @@ async function serviceSuite() {
 
 // ---------------------------------------------------------------- bundle
 
-console.log('\n== 插件包里的服务与 lib/ 同步 ==');
+console.log('\n== 插件包里带着完整的运行时 ==');
 {
-  const drift = fs
-    .readdirSync(path.join(ROOT, 'lib'))
-    .filter((name) => {
-      const bundled = path.join(ROOT, 'plugin', 'server', 'lib', name);
-      return !fs.existsSync(bundled) || !fs.readFileSync(bundled).equals(fs.readFileSync(path.join(ROOT, 'lib', name)));
-    });
-  check('plugin/server/lib 与 lib 一致（不一致就跑 npm run sync:plugin）', drift.length === 0, drift.join(', '));
+  const drift = [];
+  const walk = (rel) => {
+    const source = path.join(ROOT, rel);
+    if (fs.statSync(source).isDirectory()) {
+      for (const name of fs.readdirSync(source)) walk(path.join(rel, name));
+      return;
+    }
+    const copy = path.join(ROOT, 'plugin', 'server', rel);
+    if (!fs.existsSync(copy) || !fs.readFileSync(copy).equals(fs.readFileSync(source))) drift.push(rel);
+  };
+  for (const rel of ['lib', 'bin', 'assets', 'package.json']) walk(rel);
+  check('plugin/server 里的 lib、bin、assets、package.json 和源文件一致（不一致就跑 npm run sync:plugin）', drift.length === 0, drift.join(', '));
 }
 
 (async () => {

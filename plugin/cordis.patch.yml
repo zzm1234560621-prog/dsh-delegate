@@ -1,11 +1,12 @@
-# DSH already has native subagents (subagent / subagent_fork / workflow), so this
-# bundle does not mount an MCP client inside DSH.
-#
-# It only wires *external* agent clients (Claude Desktop / Claude Code / Codex) to
-# the local DSH MCP server, so installing this bundle in DSH is enough for Claude
-# to call DSH. Set wireClients: false to opt out.
+# Installing this bundle sets up the same things as the install script (see index.js):
+# runtime, skill, delegation notes, the dsh launcher and the MCP entries of Claude
+# Desktop / Claude Code / Codex, plus the local service behind the panel. DSH already
+# has native subagents, so no MCP client is mounted inside DSH itself.
 - insert:
     - id: dsh-delegate-bootstrap
       name: dsh-delegate
       config:
-        wireClients: true
+        wireClients: true    # write the Claude Desktop / Claude Code / Codex entries
+        startService: true   # start the local service (panel, dashboard) with DSH
+        autostart: false     # login start + watchdog, like install --autostart
+        usageHooks: false    # quota reminders in Claude Code, like install --usage-hooks

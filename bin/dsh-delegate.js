@@ -28,7 +28,7 @@ function parseArgs(argv) {
 }
 
 const KNOWN_FLAGS = {
-  install: ['dry-run', 'targets', 'no-clients', 'autostart', 'port', 'copy-credentials', 'usage-hooks', 'dsh-app'],
+  install: ['dry-run', 'targets', 'no-clients', 'no-dsh-plugin', 'autostart', 'port', 'copy-credentials', 'usage-hooks', 'dsh-app'],
   uninstall: ['remove-runtime', 'keep-clients', 'dsh-app'],
 };
 
@@ -65,6 +65,11 @@ function copyRuntime(dest) {
   const put = (root) => {
     for (const entry of ['lib', 'assets', 'bin']) {
       fs.cpSync(path.join(ROOT, entry), path.join(root, entry), { recursive: true });
+    }
+    // The DSH plugin too, so `install` can add it to DSH (lib/dsh-plugin.js). Absent
+    // when the plugin itself runs this install from its own copy of the runtime.
+    if (fs.existsSync(path.join(ROOT, 'plugin', 'package.json'))) {
+      fs.cpSync(path.join(ROOT, 'plugin'), path.join(root, 'plugin'), { recursive: true });
     }
     fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(root, 'package.json'));
   };
@@ -235,6 +240,12 @@ async function commandInstall(args) {
     }
   }
 
+  // The panel inside DSH, the same as installing the plugin from the DSH market.
+  // The plugin passes --no-dsh-plugin when it runs this install itself.
+  if (!args['no-dsh-plugin']) {
+    results.push({ what: 'dsh-plugin', ...require('../lib/dsh-plugin').add(launch, { bridge: bridgeDir(), dryRun }) });
+  }
+
   // Opt-in: Claude Code records its plan quota and gets told to delegate more when low.
   if (args['usage-hooks']) {
     for (const item of require('../lib/claude-hooks').apply(ctx, { dryRun })) {
@@ -278,6 +289,9 @@ async function commandInstall(args) {
   log('  1. 重启 Claude 桌面版 / 重新打开 Claude Code 会话，工具列表里会出现 dsh_task / dsh_parallel / dsh_job。');
   log(`  2. 自检：node "${path.join(bridgeDir(), 'bin', 'dsh-delegate.js')}" doctor --run`);
   log('  3. 在会话里说「把这个简单活派给 DSH」，或直接调用 dsh_task。');
+  if (results.some((item) => item.what === 'dsh-plugin' && item.status === 'installed')) {
+    log('  4. 打开 DSH 桌面版，输入框上方会出现委派面板。');
+  }
   if (dryRun) log('\n（dry-run：未写入任何文件）');
 }
 
@@ -297,8 +311,17 @@ function copyCredentials(dshHomeDir) {
 function commandUninstall(args) {
   // Load everything up front: --remove-runtime may delete the very files this runs from.
   const autostart = require('../lib/autostart');
+  const dshPlugin = require('../lib/dsh-plugin');
   const daemon = require('../lib/daemon').status();
   const removed = [];
+  // The plugin `install` added to DSH links into the bridge: take it out first.
+  let launch = null;
+  try {
+    launch = dsh.discover();
+  } catch {
+    /* reported by dshPlugin.remove when there is something to remove */
+  }
+  removed.push({ what: 'dsh-plugin', ...dshPlugin.remove(launch, { bridge: bridgeDir() }) });
   removed.push({ what: 'shim', ...agents.removeShim() });
   for (const item of agents.removeSkill(dsh.dshHome())) removed.push({ what: 'skill', ...item });
   for (const item of agents.removeInstructions(dsh.dshHome())) removed.push({ what: 'instructions', ...item });
@@ -664,7 +687,7 @@ async function main() {
   log(`dsh-delegate ${pkg.version} — 让 Claude / Codex 把简单任务派给本机 DeepSeek Harness
 
 用法：
-  dsh-delegate install [--targets=claude-desktop,claude-code,codex] [--dry-run] [--copy-credentials] [--autostart] [--usage-hooks]
+  dsh-delegate install [--targets=claude-desktop,claude-code,codex] [--dry-run] [--copy-credentials] [--autostart] [--usage-hooks] [--no-dsh-plugin]
   dsh-delegate quota                                     # Claude / Codex 额度和当前派活档位
   dsh-delegate retry [--limit=8] [--concurrency=2] [--id=run-...]   # 继续失败的任务
   dsh-delegate statusline | hook prompt                  # Claude Code 的 statusLine / UserPromptSubmit（--usage-hooks 配好）
