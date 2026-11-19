@@ -232,7 +232,7 @@ dsh-delegate quota             # show Claude / Codex quota and current tier
 
 The service listens on `127.0.0.1` only and accepts requests only from local processes, local pages (the dashboard itself, `dsh web`) and the DSH desktop app. Requests that other websites send from your browser get a 403. If you really need another origin, add it with the `DSH_DELEGATE_ALLOWED_ORIGINS` environment variable.
 
-The service doesn't start with Claude or DSH. To keep it running, turn on autostart: `dsh-delegate autostart on`. On Windows that is a scheduled task that starts it at login and checks every 5 minutes, bringing it back if it stopped; on macOS the LaunchAgent restarts it after an abnormal exit; on Linux it only starts at login. Every start and exit of the service is logged to `$DSH_HOME/delegate-daemon.log`.
+With the DSH plugin installed, starting DSH also starts the service; otherwise it doesn't start with Claude or DSH. To keep it running, turn on autostart: `dsh-delegate autostart on`. When you reinstall or upgrade while the service still runs an older version, the installer switches it to the new one on the same port. The dashboard's restart button works the same way: a new process takes over the same port. On Windows that is a scheduled task that starts it at login and checks every 5 minutes, bringing it back if it stopped; on macOS the LaunchAgent restarts it after an abnormal exit; on Linux it only starts at login. Every start and exit of the service is logged to `$DSH_HOME/delegate-daemon.log`.
 
 ## Checks and tests
 

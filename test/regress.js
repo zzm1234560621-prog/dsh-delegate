@@ -1167,6 +1167,100 @@ async function serviceSuite() {
   first.kill();
 }
 
+async function restartSuite() {
+  console.log('\n== 重启服务：新进程接上同一个端口；升级时换掉旧版本的服务 ==');
+  const version = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
+  const alive = (pid) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (cause) {
+      return cause.code === 'EPERM';
+    }
+  };
+  const stateOf = (sb) => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(sb.home, 'delegate-daemon.json'), 'utf8'));
+    } catch {
+      return null;
+    }
+  };
+  const waitFor = async (test, ms = 15000) => {
+    for (const end = Date.now() + ms; Date.now() < end; ) {
+      const value = test();
+      if (value) return value;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return null;
+  };
+  const startService = async (sb) => {
+    const port = 30000 + Math.floor(Math.random() * 10000);
+    nodeEval(sb, `require(${req('config.js')}).writeSettings({ daemonPort: ${port}, daemonUi: false })`);
+    spawn(NODE, [CLI, 'daemon', `--port=${port}`, '--no-ui'], { env: envFor(sb), stdio: 'ignore', detached: true }).unref();
+    return waitFor(() => {
+      const state = stateOf(sb);
+      return state && alive(state.pid) ? state : null;
+    });
+  };
+  const replacedBy = (sb, old) =>
+    waitFor(() => {
+      const state = stateOf(sb);
+      return state && state.pid !== old.pid && alive(state.pid) ? state : null;
+    });
+  const stop = (sb) => {
+    const state = stateOf(sb);
+    try {
+      if (state && alive(state.pid)) process.kill(state.pid);
+    } catch {
+      /* already gone */
+    }
+  };
+  const row = (text) => text.split('\n').find((line) => /^\s+service\s/.test(line)) || '';
+
+  const sb = sandbox('restart');
+  const first = await startService(sb);
+  const asked = first
+    ? await request(`http://127.0.0.1:${first.port}`, 'POST', '/api/service/restart', { 'content-type': 'application/json' }, '{}')
+    : { status: 0 };
+  const second = first && (await replacedBy(sb, first));
+  const answer = second ? await request(`http://127.0.0.1:${second.port}`, 'GET', '/api/service') : { status: 0 };
+  check(
+    '看板「重启服务」：同一端口由新进程接上，旧进程退出',
+    asked.status === 200 && Boolean(second) && second.port === first.port && answer.status === 200 && !alive(first.pid),
+    JSON.stringify({ asked: asked.status, first: first && first.pid, second: second && second.pid }),
+  );
+  check('状态里记着版本和运行的是哪份 CLI', Boolean(second) && second.version === version && /dsh-delegate\.js$/.test(second.cli || ''), JSON.stringify(second));
+  stop(sb);
+
+  // An older service from the bridge: no version or cli in its state yet.
+  const old = sandbox('upgrade');
+  const before = await startService(old);
+  if (before) {
+    const legacy = { ...before };
+    delete legacy.version;
+    delete legacy.cli;
+    fs.writeFileSync(path.join(old.home, 'delegate-daemon.json'), JSON.stringify(legacy));
+  }
+  const upgrade = cli(old, ['install', '--no-clients', '--no-dsh-plugin'], FAKE_DESKTOP);
+  const after = before && (await replacedBy(old, before));
+  check(
+    '重装时服务还在跑旧版本：换成这个版本，端口不变',
+    /service\s+restarted/.test(row(upgrade.stdout)) && Boolean(after) && after.version === version && after.port === before.port && !alive(before.pid),
+    `${row(upgrade.stdout)} ${upgrade.stderr.trim().slice(-200)}`,
+  );
+  const again = cli(old, ['install', '--no-clients', '--no-dsh-plugin'], FAKE_DESKTOP);
+  check('版本已一致：不再重启', /service\s+current/.test(row(again.stdout)) && stateOf(old).pid === after.pid, row(again.stdout));
+  stop(old);
+
+  // A service run from a development checkout (cli = this repo, not the bridge).
+  const dev = sandbox('upgrade-dev');
+  const running = await startService(dev);
+  if (running) fs.writeFileSync(path.join(dev.home, 'delegate-daemon.json'), JSON.stringify({ ...running, version: '0.0.1' }));
+  const kept = cli(dev, ['install', '--no-clients', '--no-dsh-plugin'], FAKE_DESKTOP);
+  check('别处启动的服务（开发用的克隆）不动', /service\s+kept/.test(row(kept.stdout)) && Boolean(running) && alive(running.pid), row(kept.stdout));
+  stop(dev);
+}
+
 // ---------------------------------------------------------------- bundle
 
 console.log('\n== 插件包里带着完整的运行时 ==');
@@ -1191,6 +1285,7 @@ console.log('\n== 插件包里带着完整的运行时 ==');
   await jobRecoverySuite();
   await quotaSuite();
   await serviceSuite();
+  await restartSuite();
   if (WIN) await batSuite();
   for (const dir of sandboxes) {
     try {
